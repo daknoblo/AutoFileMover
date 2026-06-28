@@ -1,9 +1,8 @@
 services:
   autofilemover:
-    # Use the published image…
-    image: ghcr.io/daknoblo/autofilemover:main
-    # …or build locally:
-    # build: .
+    # Published image from GitHub Container Registry (GHCR).
+    # Tags: latest (= main branch), main, vX.Y.Z (releases), sha-<commit>.
+    image: ghcr.io/daknoblo/autofilemover:latest
     container_name: autofilemover
     restart: unless-stopped
     ports:
