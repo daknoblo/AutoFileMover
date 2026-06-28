@@ -1,0 +1,14 @@
+# Binaries
+/autofilemover
+/bin/
+/out/
+
+# Local data / SQLite
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# OS / editor
+.DS_Store
+*.log

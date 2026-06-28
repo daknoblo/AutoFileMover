@@ -1,0 +1,39 @@
+{
+	"name": "AutoFileMover (Go)",
+	"image": "mcr.microsoft.com/devcontainers/go:1-1.23-bookworm",
+	"features": {
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"golang.go",
+				"ms-azuretools.vscode-docker",
+				"github.vscode-github-actions"
+			],
+			"settings": {
+				"go.useLanguageServer": true,
+				"go.lintTool": "golangci-lint",
+				"editor.formatOnSave": true,
+				"[go]": {
+					"editor.defaultFormatter": "golang.go"
+				}
+			}
+		}
+	},
+	"forwardPorts": [8080],
+	"portsAttributes": {
+		"8080": {
+			"label": "AutoFileMover Web UI",
+			"onAutoForward": "notify"
+		}
+	},
+	"postCreateCommand": "go mod download",
+	"remoteEnv": {
+		"AFM_DB_PATH": "${containerWorkspaceFolder}/data/autofilemover.db",
+		"AFM_MEDIA_ROOT": "${containerWorkspaceFolder}/devmedia",
+		"AFM_LOG_LEVEL": "debug",
+		"AFM_STABILITY_WINDOW": "3s"
+	}
+}

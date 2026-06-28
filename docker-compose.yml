@@ -1,0 +1,26 @@
+services:
+  autofilemover:
+    # Use the published image…
+    image: ghcr.io/daknoblo/autofilemover:main
+    # …or build locally:
+    # build: .
+    container_name: autofilemover
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      AFM_HTTP_ADDR: ":8080"
+      AFM_DB_PATH: "/data/autofilemover.db"
+      AFM_MEDIA_ROOT: "/media"
+      # How long a download must be unchanged before it is processed.
+      AFM_STABILITY_WINDOW: "30s"
+      # Fallback periodic scan interval (the watcher reacts in real time).
+      AFM_SCAN_INTERVAL: "5m"
+      AFM_LOG_LEVEL: "info"
+    # Match your media owner so moved files keep correct permissions.
+    # user: "1000:1000"
+    volumes:
+      # Persistent app database.
+      - ./data:/data
+      # Your Jellyfin media root containing Downloads + libraries.
+      - /path/to/media:/media
