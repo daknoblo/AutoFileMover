@@ -10,7 +10,7 @@ services:
     environment:
       AFM_HTTP_ADDR: ":8080"
       AFM_DB_PATH: "/data/autofilemover.db"
-      AFM_MEDIA_ROOT: "/media"
+      AFM_MEDIA_ROOT: "/dataroot"
       # How long a download must be unchanged before it is processed.
       AFM_STABILITY_WINDOW: "30s"
       # Fallback periodic scan interval (the watcher reacts in real time).
@@ -21,5 +21,6 @@ services:
     volumes:
       # Persistent app database.
       - ./data:/data
-      # Your Jellyfin media root containing Downloads + libraries.
-      - /path/to/media:/media
+      # Your media root containing Downloads + Jellyfin libraries.
+      # It is mounted as /dataroot, which then becomes the root in the web UI.
+      - /data/mounts/storage-box/media/:/dataroot

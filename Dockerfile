@@ -23,7 +23,7 @@ COPY --from=build /out/autofilemover /autofilemover
 # Data volume holds the SQLite database; media is bind-mounted at runtime.
 ENV AFM_HTTP_ADDR=:8080 \
     AFM_DB_PATH=/data/autofilemover.db \
-    AFM_MEDIA_ROOT=/media
+    AFM_MEDIA_ROOT=/dataroot
 VOLUME ["/data"]
 EXPOSE 8080
 

@@ -31,7 +31,7 @@ func Load() Config {
 	return Config{
 		HTTPAddr:        getEnv("AFM_HTTP_ADDR", ":8080"),
 		DBPath:          getEnv("AFM_DB_PATH", "/data/autofilemover.db"),
-		MediaRoot:       getEnv("AFM_MEDIA_ROOT", "/media"),
+		MediaRoot:       getEnv("AFM_MEDIA_ROOT", "/dataroot"),
 		StabilityWindow: getEnvDuration("AFM_STABILITY_WINDOW", 30*time.Second),
 		ScanInterval:    getEnvDuration("AFM_SCAN_INTERVAL", 5*time.Minute),
 	}

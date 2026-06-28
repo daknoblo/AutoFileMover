@@ -63,6 +63,7 @@ type settingsDTO struct {
 	HasAPIKey    bool    `json:"has_api_key"`
 	Threshold    float64 `json:"threshold"`
 	AutoMove     bool    `json:"auto_move"`
+	DryRun       bool    `json:"dry_run"`
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +79,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		HasAPIKey:    a.AIAPIKey != "",
 		Threshold:    a.Threshold,
 		AutoMove:     a.AutoMove,
+		DryRun:       a.DryRun,
 	})
 }
 
@@ -310,8 +312,111 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "scan started"})
 }
 
+// ---- What-if (dry-run) ----
+
+func (s *Server) handleSetDryRun(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if err := s.store.SetDryRun(r.Context(), body.Enabled); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"dry_run": body.Enabled})
+}
+
+// ---- Folder browser & descriptions ----
+
+type browseEntry struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Description string `json:"description"`
+}
+
+type browseResponse struct {
+	Path    string        `json:"path"`
+	Parent  string        `json:"parent"`
+	AtRoot  bool          `json:"at_root"`
+	Entries []browseEntry `json:"entries"`
+}
+
+func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
+	root := filepath.Clean(s.cfg.MediaRoot)
+	p := strings.TrimSpace(r.URL.Query().Get("path"))
+	if p == "" {
+		p = root
+	}
+	clean := filepath.Clean(p)
+	// Constrain browsing to the media root.
+	if clean != root && !strings.HasPrefix(clean, root+string(os.PathSeparator)) {
+		clean = root
+	}
+	info, err := os.Stat(clean)
+	if err != nil || !info.IsDir() {
+		writeErr(w, http.StatusBadRequest, "path is not a directory")
+		return
+	}
+
+	notes, err := s.store.FolderNotesByPath(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dirEntries, err := os.ReadDir(clean)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	entries := []browseEntry{}
+	for _, e := range dirEntries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		full := filepath.Join(clean, e.Name())
+		entries = append(entries, browseEntry{Name: e.Name(), Path: full, Description: notes[full]})
+	}
+
+	parent := filepath.Dir(clean)
+	atRoot := clean == root
+	if atRoot {
+		parent = clean
+	}
+	writeJSON(w, http.StatusOK, browseResponse{
+		Path:    clean,
+		Parent:  parent,
+		AtRoot:  atRoot,
+		Entries: entries,
+	})
+}
+
+func (s *Server) handleSetFolderNote(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Path        string `json:"path"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	path := filepath.Clean(strings.TrimSpace(body.Path))
+	if err := s.validatePath(path); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.SetFolderNote(r.Context(), path, strings.TrimSpace(body.Description)); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, store.FolderNote{Path: path, Description: strings.TrimSpace(body.Description)})
+}
+
 func (s *Server) resync() {
 	if s.resyncer != nil {
 		s.resyncer.Resync(context.Background())
 	}
 }
+

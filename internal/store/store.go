@@ -129,6 +129,11 @@ CREATE TABLE IF NOT EXISTS items (
 	updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
+CREATE TABLE IF NOT EXISTS folder_notes (
+	path        TEXT PRIMARY KEY,
+	description TEXT NOT NULL DEFAULT '',
+	updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `
 	_, err := s.db.Exec(schema)
 	if err != nil {
