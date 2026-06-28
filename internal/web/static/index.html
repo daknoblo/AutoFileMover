@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>AutoFileMover</title>
+	<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+	<header>
+		<h1>AutoFileMover</h1>
+		<button id="scanBtn" class="btn">Jetzt scannen</button>
+	</header>
+
+	<nav class="tabs">
+		<button class="tab active" data-tab="review">Review-Queue <span id="reviewCount" class="badge"></span></button>
+		<button class="tab" data-tab="history">Verlauf</button>
+		<button class="tab" data-tab="sources">Quellordner</button>
+		<button class="tab" data-tab="libraries">Bibliotheken</button>
+		<button class="tab" data-tab="settings">Einstellungen</button>
+	</nav>
+
+	<main>
+		<section id="review" class="panel active">
+			<h2>Zu prüfen</h2>
+			<p class="hint">Elemente, bei denen die KI-Sicherheit unter dem Schwellwert lag oder kein Ziel gefunden wurde.</p>
+			<div id="reviewList" class="cards"></div>
+		</section>
+
+		<section id="history" class="panel">
+			<h2>Verlauf</h2>
+			<div id="historyList" class="cards"></div>
+		</section>
+
+		<section id="sources" class="panel">
+			<h2>Quellordner</h2>
+			<p class="hint">Ordner, die auf neue Downloads überwacht werden.</p>
+			<form id="sourceForm" class="inline-form">
+				<input type="text" id="sourcePath" placeholder="/media/Downloads" required />
+				<button type="submit" class="btn">Hinzufügen</button>
+			</form>
+			<ul id="sourceList" class="list"></ul>
+		</section>
+
+		<section id="libraries" class="panel">
+			<h2>Ziel-Bibliotheken</h2>
+			<p class="hint">Zielordner für Filme, Serien und Dokumentationen.</p>
+			<form id="libraryForm" class="inline-form">
+				<input type="text" id="libName" placeholder="Name (z. B. Filme)" required />
+				<select id="libKind">
+					<option value="movie">Film</option>
+					<option value="series">Serie</option>
+					<option value="documentary">Dokumentation</option>
+				</select>
+				<input type="text" id="libPath" placeholder="/media/Filme" required />
+				<button type="submit" class="btn">Hinzufügen</button>
+			</form>
+			<ul id="libraryList" class="list"></ul>
+		</section>
+
+		<section id="settings" class="panel">
+			<h2>Einstellungen</h2>
+			<form id="settingsForm" class="stacked-form">
+				<label>KI Endpoint (Base URL)
+					<input type="text" id="aiBaseUrl" placeholder="https://<resource>.openai.azure.com" />
+				</label>
+				<label>Deployment / Modell
+					<input type="text" id="aiModel" placeholder="gpt-4o-mini" />
+				</label>
+				<label>Azure API-Version <small>(leer lassen für reine OpenAI-API)</small>
+					<input type="text" id="aiApiVersion" placeholder="2024-06-01" />
+				</label>
+				<label>API-Key <small id="keyHint"></small>
+					<input type="password" id="aiApiKey" placeholder="••••••••" autocomplete="off" />
+				</label>
+				<label>Schwellwert für automatisches Verschieben: <strong id="thresholdValue">90%</strong>
+					<input type="range" id="threshold" min="0" max="100" step="1" value="90" />
+				</label>
+				<label class="checkbox">
+					<input type="checkbox" id="autoMove" checked /> Automatisches Verschieben aktiv
+				</label>
+				<button type="submit" class="btn">Speichern</button>
+			</form>
+		</section>
+	</main>
+
+	<div id="toast" class="toast"></div>
+	<script src="app.js"></script>
+</body>
+</html>

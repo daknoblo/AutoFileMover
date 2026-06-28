@@ -1,0 +1,170 @@
+:root {
+	--bg: #0f1115;
+	--panel: #181b21;
+	--panel-2: #1f242c;
+	--border: #2a313b;
+	--text: #e6e9ef;
+	--muted: #9aa4b2;
+	--accent: #4f8cff;
+	--accent-2: #2f6fe0;
+	--green: #3fb950;
+	--red: #f85149;
+	--yellow: #d29922;
+}
+
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	background: var(--bg);
+	color: var(--text);
+}
+
+header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 16px 24px;
+	border-bottom: 1px solid var(--border);
+}
+
+header h1 { font-size: 20px; margin: 0; }
+
+.tabs {
+	display: flex;
+	gap: 4px;
+	padding: 0 24px;
+	border-bottom: 1px solid var(--border);
+	flex-wrap: wrap;
+}
+
+.tab {
+	background: none;
+	border: none;
+	color: var(--muted);
+	padding: 12px 16px;
+	cursor: pointer;
+	font-size: 14px;
+	border-bottom: 2px solid transparent;
+}
+
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.badge {
+	display: inline-block;
+	min-width: 18px;
+	padding: 0 6px;
+	border-radius: 9px;
+	background: var(--accent);
+	color: #fff;
+	font-size: 12px;
+	text-align: center;
+}
+.badge:empty { display: none; }
+
+main { padding: 24px; max-width: 980px; }
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+h2 { margin-top: 0; }
+.hint { color: var(--muted); margin-top: -8px; font-size: 14px; }
+
+.btn {
+	background: var(--accent);
+	color: #fff;
+	border: none;
+	border-radius: 6px;
+	padding: 8px 14px;
+	cursor: pointer;
+	font-size: 14px;
+}
+.btn:hover { background: var(--accent-2); }
+.btn.secondary { background: var(--panel-2); border: 1px solid var(--border); }
+.btn.danger { background: var(--red); }
+.btn.small { padding: 4px 10px; font-size: 13px; }
+
+.inline-form { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
+.inline-form input, .inline-form select { flex: 1; min-width: 160px; }
+
+input, select {
+	background: var(--panel);
+	border: 1px solid var(--border);
+	color: var(--text);
+	border-radius: 6px;
+	padding: 8px 10px;
+	font-size: 14px;
+}
+
+.stacked-form { display: flex; flex-direction: column; gap: 16px; max-width: 520px; }
+.stacked-form label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.stacked-form label.checkbox { flex-direction: row; align-items: center; gap: 8px; }
+.stacked-form small { color: var(--muted); }
+
+.list { list-style: none; padding: 0; }
+.list li {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 10px 14px;
+	margin-bottom: 8px;
+}
+.list li .meta { color: var(--muted); font-size: 13px; }
+
+.cards { display: flex; flex-direction: column; gap: 12px; }
+
+.card {
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 16px;
+}
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.card-title { font-weight: 600; word-break: break-word; }
+.card-sub { color: var(--muted); font-size: 13px; margin: 4px 0; }
+.files { color: var(--muted); font-size: 12px; max-height: 120px; overflow: auto; margin: 8px 0; }
+.files div { padding: 1px 0; }
+
+.prob {
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+	padding: 2px 8px;
+	border-radius: 12px;
+	font-size: 13px;
+}
+.prob.high { background: rgba(63,185,80,.15); color: var(--green); }
+.prob.mid { background: rgba(210,153,34,.15); color: var(--yellow); }
+.prob.low { background: rgba(248,81,73,.15); color: var(--red); }
+
+.status {
+	font-size: 12px;
+	padding: 2px 8px;
+	border-radius: 12px;
+	background: var(--panel-2);
+	color: var(--muted);
+}
+
+.card-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+.card-actions select { min-width: 160px; }
+
+.toast {
+	position: fixed;
+	bottom: 24px;
+	left: 50%;
+	transform: translateX(-50%);
+	background: var(--panel-2);
+	border: 1px solid var(--border);
+	color: var(--text);
+	padding: 10px 16px;
+	border-radius: 8px;
+	opacity: 0;
+	transition: opacity .2s;
+	pointer-events: none;
+}
+.toast.show { opacity: 1; }
+.toast.error { border-color: var(--red); }
