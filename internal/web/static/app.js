@@ -266,7 +266,25 @@ async function loadSettings() {
 	document.getElementById("thresholdValue").textContent = Math.round((s.threshold ?? 0.9) * 100) + "%";
 	document.getElementById("autoMove").checked = !!s.auto_move;
 	document.getElementById("keyHint").textContent = s.has_api_key ? "(gespeichert – leer lassen zum Beibehalten)" : "(noch nicht gesetzt)";
+	applyDryRun(!!s.dry_run);
 }
+
+function applyDryRun(enabled) {
+	document.getElementById("dryRun").checked = enabled;
+	document.getElementById("dryRunBanner").hidden = !enabled;
+}
+
+document.getElementById("dryRun").addEventListener("change", async (e) => {
+	const enabled = e.target.checked;
+	try {
+		await api("PUT", "/dry-run", { enabled });
+		applyDryRun(enabled);
+		toast(enabled ? "What-If-Modus aktiviert" : "What-If-Modus deaktiviert");
+	} catch (err) {
+		e.target.checked = !enabled;
+		toast(err.message, true);
+	}
+});
 
 document.getElementById("threshold").addEventListener("input", (e) => {
 	document.getElementById("thresholdValue").textContent = e.target.value + "%";
@@ -309,12 +327,55 @@ async function refreshAll() {
 	await loadItems();
 }
 
+// ---- Folder browser & descriptions ----
+let currentBrowsePath = "";
+let currentBrowseParent = "";
+
+async function loadBrowse(path) {
+	const q = path ? "?path=" + encodeURIComponent(path) : "";
+	const data = await api("GET", "/browse" + q);
+	currentBrowsePath = data.path;
+	currentBrowseParent = data.parent;
+	document.getElementById("browsePath").textContent = data.path;
+	document.getElementById("browseUp").disabled = data.at_root;
+
+	const list = document.getElementById("browseList");
+	list.innerHTML = "";
+	if (data.entries.length === 0) {
+		list.appendChild(el("li", { class: "hint", text: "Keine Unterordner." }));
+	}
+	data.entries.forEach((entry) => {
+		const open = el("button", { class: "btn small secondary folder-open", type: "button", text: "📁 " + entry.name });
+		open.addEventListener("click", () => loadBrowse(entry.path));
+
+		const desc = el("input", { type: "text", class: "folder-desc", placeholder: "Beschreibung als KI-Kontext…" });
+		desc.value = entry.description || "";
+
+		const save = el("button", { class: "btn small", type: "button", text: "Speichern" });
+		save.addEventListener("click", async () => {
+			try {
+				await api("PUT", "/folder-notes", { path: entry.path, description: desc.value.trim() });
+				toast("Beschreibung gespeichert");
+			} catch (e) {
+				toast(e.message, true);
+			}
+		});
+
+		list.appendChild(el("li", { class: "browse-item" }, [open, desc, save]));
+	});
+}
+
+document.getElementById("browseUp").addEventListener("click", () => {
+	if (currentBrowseParent) loadBrowse(currentBrowseParent);
+});
+
 async function init() {
 	try {
 		await loadSettings();
 		await loadSources();
 		await loadLibraries();
 		await loadItems();
+		await loadBrowse("");
 	} catch (e) {
 		toast(e.message, true);
 	}

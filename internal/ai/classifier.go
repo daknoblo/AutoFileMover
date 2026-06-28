@@ -7,20 +7,32 @@ import (
 	"strings"
 )
 
+// ExistingFolder is a sub-folder already present in a library, with an optional
+// user-provided description used as additional context.
+type ExistingFolder struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
 // LibraryInfo describes a candidate target library for classification.
 type LibraryInfo struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
-	// ExistingFolders are the sub-folder names already present in the library.
+	// Description is an optional user-provided context for this library.
+	Description string `json:"description,omitempty"`
+	// ExistingFolders are the sub-folders already present in the library.
 	// For series libraries the model must pick one of these (or report none).
-	ExistingFolders []string `json:"existing_folders,omitempty"`
+	ExistingFolders []ExistingFolder `json:"existing_folders,omitempty"`
 }
 
 // Request is the input to a classification.
 type Request struct {
-	Name      string        `json:"name"`
-	Files     []string      `json:"files"`
-	Libraries []LibraryInfo `json:"libraries"`
+	Name string   `json:"name"`
+	Files []string `json:"files"`
+	// SourceContext is an optional description of the source folder the item was
+	// found in, supplied by the user as additional context.
+	SourceContext string        `json:"source_context,omitempty"`
+	Libraries     []LibraryInfo `json:"libraries"`
 }
 
 // Result is the structured classification produced by the model.
@@ -50,6 +62,7 @@ Rules:
   that matches the show. If none of the existing folders match the show, set "series_folder" to "".
 - "confidence" is your overall certainty (0.0 to 1.0) that BOTH the type and the target are correct.
 - Be conservative: if the name is ambiguous or no good target exists, lower the confidence.
+- Use any provided folder descriptions as additional context to pick the correct target.
 - Respond ONLY with a JSON object, no markdown, matching this exact schema:
 {"type": string, "library": string, "series_folder": string, "title": string, "confidence": number, "reasoning": string}`
 
@@ -71,6 +84,10 @@ func buildUserPrompt(req Request) string {
 	var b strings.Builder
 	b.WriteString("Downloaded item name:\n")
 	b.WriteString(req.Name)
+	if req.SourceContext != "" {
+		b.WriteString("\n\nSource folder context:\n")
+		b.WriteString(req.SourceContext)
+	}
 	b.WriteString("\n\nFiles contained:\n")
 	if len(req.Files) == 0 {
 		b.WriteString("(none)\n")
@@ -83,13 +100,20 @@ func buildUserPrompt(req Request) string {
 	b.WriteString("\nAvailable target libraries:\n")
 	for _, l := range req.Libraries {
 		b.WriteString(fmt.Sprintf("- name=%q kind=%q", l.Name, l.Kind))
+		if l.Description != "" {
+			b.WriteString(fmt.Sprintf(" description=%q", l.Description))
+		}
 		if len(l.ExistingFolders) > 0 {
 			b.WriteString(" existing_folders=[")
 			for i, f := range l.ExistingFolders {
 				if i > 0 {
 					b.WriteString(", ")
 				}
-				b.WriteString(fmt.Sprintf("%q", f))
+				if f.Description != "" {
+					b.WriteString(fmt.Sprintf("{name=%q, description=%q}", f.Name, f.Description))
+				} else {
+					b.WriteString(fmt.Sprintf("%q", f.Name))
+				}
 			}
 			b.WriteString("]")
 		}

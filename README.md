@@ -9,7 +9,7 @@ Web-Oberfläche mit (für Betrieb hinter einem Reverse Proxy gedacht).
 
 ## Funktionsweise
 
-1. Der Medienordner wird in den Container gemountet (`/media`). Darin liegen der
+1. Der Medienordner wird in den Container gemountet (`/dataroot`). Darin liegen der
    Download-Ordner sowie die Ziel-Bibliotheken.
 2. Ein **Watcher** (`fsnotify`) überwacht die konfigurierten **Quellordner**.
    Sobald ein Download „stabil“ ist (eine konfigurierbare Zeit nicht mehr
@@ -48,11 +48,11 @@ Danach die Web-UI öffnen: <http://localhost:8080>
 
 In der UI:
 
-1. **Quellordner** anlegen, z. B. `/media/Downloads`.
+1. **Quellordner** anlegen, z. B. `/dataroot/Downloads`.
 2. **Bibliotheken** anlegen, z. B.
-   - `Filme` (Film) → `/media/Filme`
-   - `Serien` (Serie) → `/media/Serien`
-   - `Dokus` (Dokumentation) → `/media/Dokumentationen`
+   - `Filme` (Film) → `/dataroot/Filme`
+   - `Serien` (Serie) → `/dataroot/Serien`
+   - `Dokus` (Dokumentation) → `/dataroot/Dokumentationen`
 3. Unter **Einstellungen** den KI-Endpoint konfigurieren und den Schwellwert
    sowie „Automatisches Verschieben“ festlegen.
 
@@ -84,7 +84,7 @@ angezeigt, nie zurückgegeben.
 | ----------------------- | ----------------------------- | ---------------------------------------------------- |
 | `AFM_HTTP_ADDR`         | `:8080`                       | Listen-Adresse des Webservers                        |
 | `AFM_DB_PATH`           | `/data/autofilemover.db`      | Pfad der SQLite-Datenbank                            |
-| `AFM_MEDIA_ROOT`        | `/media`                      | Wurzel des gemounteten Medienverzeichnisses          |
+| `AFM_MEDIA_ROOT`        | `/dataroot`                   | Wurzel des gemounteten Medienverzeichnisses          |
 | `AFM_STABILITY_WINDOW`  | `30s`                         | Ruhezeit, bevor ein Download verarbeitet wird        |
 | `AFM_SCAN_INTERVAL`     | `5m`                          | Fallback-Intervall für periodische Scans             |
 | `AFM_LOG_LEVEL`         | `info`                        | `debug`, `info`, `warn`, `error`                     |

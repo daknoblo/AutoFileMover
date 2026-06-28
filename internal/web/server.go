@@ -60,6 +60,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/items/{id}", s.handleDeleteItem)
 
 	mux.HandleFunc("POST /api/scan", s.handleScan)
+	mux.HandleFunc("PUT /api/dry-run", s.handleSetDryRun)
+
+	// Folder browser & per-folder descriptions (AI context).
+	mux.HandleFunc("GET /api/browse", s.handleBrowse)
+	mux.HandleFunc("PUT /api/folder-notes", s.handleSetFolderNote)
 
 	// Static UI.
 	sub, _ := fs.Sub(staticFS, "static")

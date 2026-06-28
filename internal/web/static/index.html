@@ -9,8 +9,16 @@
 <body>
 	<header>
 		<h1>AutoFileMover</h1>
-		<button id="scanBtn" class="btn">Jetzt scannen</button>
+		<div class="header-actions">
+			<label class="whatif" title="Im What-If-Modus werden keine Dateien verschoben.">
+				<input type="checkbox" id="dryRun" /> What-If-Modus
+			</label>
+			<button id="scanBtn" class="btn">Jetzt scannen</button>
+		</div>
 	</header>
+	<div id="dryRunBanner" class="dryrun-banner" hidden>
+		What-If-Modus aktiv – es werden keine Dateien verschoben.
+	</div>
 
 	<nav class="tabs">
 		<button class="tab active" data-tab="review">Review-Queue <span id="reviewCount" class="badge"></span></button>
@@ -36,7 +44,7 @@
 			<h2>Quellordner</h2>
 			<p class="hint">Ordner, die auf neue Downloads überwacht werden.</p>
 			<form id="sourceForm" class="inline-form">
-				<input type="text" id="sourcePath" placeholder="/media/Downloads" required />
+				<input type="text" id="sourcePath" placeholder="/dataroot/Downloads" required />
 				<button type="submit" class="btn">Hinzufügen</button>
 			</form>
 			<ul id="sourceList" class="list"></ul>
@@ -52,7 +60,7 @@
 					<option value="series">Serie</option>
 					<option value="documentary">Dokumentation</option>
 				</select>
-				<input type="text" id="libPath" placeholder="/media/Filme" required />
+				<input type="text" id="libPath" placeholder="/dataroot/Filme" required />
 				<button type="submit" class="btn">Hinzufügen</button>
 			</form>
 			<ul id="libraryList" class="list"></ul>
@@ -81,6 +89,17 @@
 				</label>
 				<button type="submit" class="btn">Speichern</button>
 			</form>
+
+			<h2>Datei-Navigation &amp; Ordner-Kontext</h2>
+			<p class="hint">Navigiere durch deinen Medienordner. Zu jedem Ordner kannst du eine Beschreibung
+				hinterlegen, die als Kontext an den KI-Endpoint mitgesendet wird.</p>
+			<div class="browser">
+				<div class="browser-bar">
+					<button id="browseUp" class="btn small secondary" type="button">▲ Übergeordnet</button>
+					<span id="browsePath" class="browse-path"></span>
+				</div>
+				<ul id="browseList" class="browse-list"></ul>
+			</div>
 		</section>
 	</main>
 

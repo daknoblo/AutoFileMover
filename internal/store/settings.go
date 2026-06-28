@@ -13,6 +13,7 @@ const (
 	KeyAIAPIVersion = "ai_api_version"
 	KeyThreshold    = "threshold"
 	KeyAutoMove     = "auto_move"
+	KeyDryRun       = "dry_run"
 )
 
 // AppSettings is the typed view of the user-configurable settings.
@@ -23,6 +24,8 @@ type AppSettings struct {
 	AIAPIVersion string  `json:"ai_api_version"`
 	Threshold    float64 `json:"threshold"`
 	AutoMove     bool    `json:"auto_move"`
+	// DryRun is the "what-if" mode: when true no files are moved.
+	DryRun bool `json:"dry_run"`
 }
 
 // LoadAppSettings reads the typed application settings, applying defaults.
@@ -41,6 +44,10 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 	if v, ok := all[KeyAutoMove]; ok {
 		autoMove = v == "true" || v == "1"
 	}
+	dryRun := false
+	if v, ok := all[KeyDryRun]; ok {
+		dryRun = v == "true" || v == "1"
+	}
 	return AppSettings{
 		AIBaseURL:    all[KeyAIBaseURL],
 		AIAPIKey:     all[KeyAIAPIKey],
@@ -48,8 +55,15 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 		AIAPIVersion: all[KeyAIAPIVersion],
 		Threshold:    threshold,
 		AutoMove:     autoMove,
+		DryRun:       dryRun,
 	}, nil
 }
+
+// SetDryRun toggles the what-if mode independently of the other settings.
+func (s *Store) SetDryRun(ctx context.Context, enabled bool) error {
+	return s.SetSetting(ctx, KeyDryRun, strconv.FormatBool(enabled))
+}
+
 
 // SaveAppSettings persists the typed application settings. An empty API key is
 // ignored so that the secret is not overwritten when the UI does not resend it.

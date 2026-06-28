@@ -59,13 +59,13 @@ func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
 			e.log.Debug("candidate not yet stable, skipping", "path", c.Path)
 			continue
 		}
-		if err := e.processCandidate(ctx, c); err != nil {
+		if err := e.processCandidate(ctx, c, sourcePath); err != nil {
 			e.log.Error("process candidate", "path", c.Path, "err", err)
 		}
 	}
 }
 
-func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate) error {
+func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sourcePath string) error {
 	existing, err := e.store.FindItemBySource(ctx, c.Path)
 	if err != nil {
 		return err
@@ -109,7 +109,7 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate) erro
 		return e.store.UpsertItem(ctx, item)
 	}
 
-	res, err := client.Classify(ctx, buildRequest(c, libs))
+	res, err := client.Classify(ctx, e.buildRequest(ctx, c, libs, sourcePath))
 	if err != nil {
 		item.Status = store.StatusError
 		item.ErrorMessage = err.Error()
@@ -135,6 +135,14 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate) erro
 	autoMove := settings.AutoMove && ok && res.Confidence >= settings.Threshold
 	if !autoMove {
 		item.Status = store.StatusPendingReview
+		return e.store.UpsertItem(ctx, item)
+	}
+
+	// What-if mode: confident enough, but do not touch the filesystem.
+	if settings.DryRun {
+		item.Status = store.StatusPendingReview
+		item.Reasoning = strings.TrimSpace("[What-If] würde automatisch verschoben nach " + item.TargetPath + " | " + item.Reasoning)
+		e.log.Info("what-if: would auto-move", "name", c.Name, "dest", item.TargetPath, "confidence", res.Confidence)
 		return e.store.UpsertItem(ctx, item)
 	}
 
@@ -165,6 +173,9 @@ func (e *Engine) ConfirmItem(ctx context.Context, id, libraryID int64, subFolder
 	item, err := e.store.GetItem(ctx, id)
 	if err != nil || item == nil {
 		return fmt.Errorf("item not found")
+	}
+	if settings, err := e.store.LoadAppSettings(ctx); err == nil && settings.DryRun {
+		return fmt.Errorf("What-If-Modus aktiv: es werden keine Dateien verschoben")
 	}
 	lib, err := e.store.GetLibrary(ctx, libraryID)
 	if err != nil {
@@ -223,21 +234,34 @@ func (e *Engine) resolveTarget(res *ai.Result, libs []store.Library) (lib *store
 }
 
 // buildRequest constructs the AI classification request, including existing
-// series folders so the model can map to an existing show.
-func buildRequest(c scanner.Candidate, libs []store.Library) ai.Request {
+// series folders and any user-provided folder descriptions so the model can
+// map to an existing show with extra context.
+func (e *Engine) buildRequest(ctx context.Context, c scanner.Candidate, libs []store.Library, sourcePath string) ai.Request {
+	notes, _ := e.store.FolderNotesByPath(ctx)
+
 	files := make([]string, 0, len(c.Files))
 	for _, f := range c.Files {
 		files = append(files, f.RelPath)
 	}
 	infos := make([]ai.LibraryInfo, 0, len(libs))
 	for _, l := range libs {
-		info := ai.LibraryInfo{Name: l.Name, Kind: l.Kind}
+		info := ai.LibraryInfo{Name: l.Name, Kind: l.Kind, Description: notes[l.Path]}
 		if l.Kind == store.KindSeries {
-			info.ExistingFolders = listSubfolders(l.Path)
+			for _, name := range listSubfolders(l.Path) {
+				info.ExistingFolders = append(info.ExistingFolders, ai.ExistingFolder{
+					Name:        name,
+					Description: notes[filepath.Join(l.Path, name)],
+				})
+			}
 		}
 		infos = append(infos, info)
 	}
-	return ai.Request{Name: c.Name, Files: files, Libraries: infos}
+	return ai.Request{
+		Name:          c.Name,
+		Files:         files,
+		SourceContext: notes[sourcePath],
+		Libraries:     infos,
+	}
 }
 
 // listSubfolders returns the immediate sub-directory names of root.
