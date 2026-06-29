@@ -116,6 +116,14 @@
 				<label><span data-i18n="ignore">Ignorierte Ordner/Dateien</span> <small data-i18n="ignore_hint">(eine pro Zeile; Teiltext oder Glob, z. B. _UNPACK, sample, *.txt)</small>
 					<textarea id="ignorePatterns" rows="4" placeholder="_UNPACK&#10;sample"></textarea>
 				</label>
+				<label><span data-i18n="log_level_setting">Log-Level</span> <small data-i18n="log_level_hint">Detailgrad der Logs (DEBUG zeigt die KI-Anfragen).</small>
+					<select id="logLevelSettings">
+						<option value="debug">DEBUG</option>
+						<option value="info">INFO</option>
+						<option value="warn">WARN</option>
+						<option value="error">ERROR</option>
+					</select>
+				</label>
 			</form>
 		</section>
 
