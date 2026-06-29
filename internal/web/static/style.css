@@ -165,10 +165,16 @@ textarea {
 /* Per-file plan rows */
 .files { max-height: 360px; }
 .frow {
-	display: flex; align-items: center; justify-content: space-between; gap: 10px;
+	display: flex; flex-direction: column; gap: 4px;
 	padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; margin: 6px 0;
 	background: var(--panel-2);
 }
+.frow-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.frow-target {
+	font-size: 12px; color: var(--green); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	word-break: break-all; padding-left: 2px;
+}
+.frow-target.none { color: var(--yellow); font-family: inherit; }
 .frow-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .fname { color: var(--text); font-size: 13px; word-break: break-all; }
 .fsize { color: var(--muted); font-size: 12px; }
@@ -243,6 +249,19 @@ textarea {
 
 /* Header actions & what-if */
 .header-actions { display: flex; align-items: center; gap: 16px; }
+
+/* Header scan status */
+.scan-status {
+	flex: 1; min-width: 0; max-width: 520px; margin: 0 24px;
+	display: flex; flex-direction: column; gap: 4px;
+}
+.scan-status[hidden] { display: none; }
+.scan-text { display: flex; gap: 6px; font-size: 13px; color: var(--muted); min-width: 0; }
+.scan-label { flex-shrink: 0; }
+.scan-current { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scan-bar { height: 6px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+.scan-bar-fill { height: 100%; width: 0; background: var(--accent); transition: width .4s ease; }
+.scan-meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .whatif {
 	display: flex;
 	align-items: center;

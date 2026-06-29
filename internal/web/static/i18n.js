@@ -35,6 +35,7 @@ const I18N = {
 		need_name: "Bitte einen Namen angeben", source_set: "Quellordner gesetzt", lib_created: "Bibliothek angelegt", desc_saved: "Beschreibung gespeichert",
 		remove: "Entfernen", key_saved: "(gespeichert – leer lassen zum Beibehalten)", key_unset: "(noch nicht gesetzt)",
 		whatif_on: "What-If-Modus aktiviert", whatif_off: "What-If-Modus deaktiviert", confirm_delete: "endgültig löschen?",
+		scan_running: "Scanne", scan_eta: "noch", empty_folder: "Leerer Ordner", no_target: "kein Ziel", error: "Fehler",
 	},
 	en: {
 		whatif: "What-if mode", whatif_hint: "In what-if mode no files are moved.",
@@ -67,6 +68,7 @@ const I18N = {
 		need_name: "Please enter a name", source_set: "Source folder set", lib_created: "Library created", desc_saved: "Description saved",
 		remove: "Remove", key_saved: "(stored – leave empty to keep)", key_unset: "(not set yet)",
 		whatif_on: "What-if mode enabled", whatif_off: "What-if mode disabled", confirm_delete: "permanently delete?",
+		scan_running: "Scanning", scan_eta: "ETA", empty_folder: "Empty folder", no_target: "no target", error: "Error",
 	},
 };
 

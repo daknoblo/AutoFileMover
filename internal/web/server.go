@@ -66,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/items/{id}", s.handleDeleteItem)
 
 	mux.HandleFunc("POST /api/scan", s.handleScan)
+	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("PUT /api/dry-run", s.handleSetDryRun)
 
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
