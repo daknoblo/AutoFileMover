@@ -4,46 +4,55 @@
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>AutoFileMover</title>
+	<link rel="icon" type="image/svg+xml" href="icon.svg" />
 	<link rel="stylesheet" href="style.css" />
 </head>
 <body>
 	<header>
-		<h1>AutoFileMover</h1>
+		<div class="brand">
+			<img src="icon.svg" alt="" class="logo" width="28" height="28" />
+			<h1>AutoFileMover</h1>
+		</div>
 		<div class="header-actions">
-			<label class="whatif" title="Im What-If-Modus werden keine Dateien verschoben.">
-				<input type="checkbox" id="dryRun" /> What-If-Modus
+			<label class="whatif" data-i18n-title="whatif_hint">
+				<input type="checkbox" id="dryRun" /> <span data-i18n="whatif">What-If-Modus</span>
 			</label>
-			<button id="scanBtn" class="btn">Jetzt scannen</button>
+			<select id="langSelect" class="lang" title="Language">
+				<option value="de">DE</option>
+				<option value="en">EN</option>
+			</select>
+			<button id="scanBtn" class="btn" data-i18n="scan_now">Jetzt scannen</button>
 		</div>
 	</header>
-	<div id="dryRunBanner" class="dryrun-banner" hidden>
+	<div id="dryRunBanner" class="dryrun-banner" hidden data-i18n="whatif_banner">
 		What-If-Modus aktiv – es werden keine Dateien verschoben.
 	</div>
 
 	<nav class="tabs">
-		<button class="tab active" data-tab="review">Review-Queue <span id="reviewCount" class="badge"></span></button>
-		<button class="tab" data-tab="history">Verlauf</button>
-		<button class="tab" data-tab="logs">Logs</button>
-		<button class="tab" data-tab="settings">Einstellungen</button>
+		<button class="tab active" data-tab="review"><span data-i18n="tab_review">Review-Queue</span> <span id="reviewCount" class="badge"></span></button>
+		<button class="tab" data-tab="history" data-i18n="tab_history">Verlauf</button>
+		<button class="tab" data-tab="logs" data-i18n="tab_logs">Logs</button>
+		<button class="tab" data-tab="settings" data-i18n="tab_settings">Einstellungen</button>
+		<button class="tab" data-tab="about" data-i18n="tab_about">Über</button>
 	</nav>
 
 	<main>
 		<section id="review" class="panel active">
-			<h2>Zu prüfen</h2>
-			<p class="hint">Elemente, bei denen die KI-Sicherheit unter dem Schwellwert lag oder kein Ziel gefunden wurde.</p>
+			<h2 data-i18n="review_title">Zu prüfen</h2>
+			<p class="hint" data-i18n="review_hint">Pro Ordner: jede Datei mit geplanter Aktion (verschieben/löschen) und Wahrscheinlichkeit. Einzeln ausführen oder „Plan ausführen“.</p>
 			<div id="reviewList" class="cards"></div>
 		</section>
 
 		<section id="history" class="panel">
-			<h2>Verlauf</h2>
+			<h2 data-i18n="tab_history">Verlauf</h2>
 			<div id="historyList" class="cards"></div>
 		</section>
 
 		<section id="logs" class="panel">
 			<div class="logs-bar">
-				<h2>Logs</h2>
+				<h2 data-i18n="tab_logs">Logs</h2>
 				<div class="logs-controls">
-					<label>Level
+					<label data-i18n="log_level">Level
 						<select id="logLevel">
 							<option value="debug">DEBUG</option>
 							<option value="info">INFO</option>
@@ -51,48 +60,60 @@
 							<option value="error">ERROR</option>
 						</select>
 					</label>
-					<label class="checkbox"><input type="checkbox" id="logAutoScroll" checked /> Auto-Scroll</label>
-					<button id="logClear" class="btn small secondary" type="button">Ansicht leeren</button>
+					<label class="checkbox"><input type="checkbox" id="logAutoScroll" checked /> <span data-i18n="log_autoscroll">Auto-Scroll</span></label>
+					<button id="logClear" class="btn small secondary" type="button" data-i18n="log_clear">Ansicht leeren</button>
 				</div>
 			</div>
 			<pre id="logOutput" class="log-output"></pre>
 		</section>
 
 		<section id="settings" class="panel active-settings">
-			<h2>Quellordner</h2>
-			<p class="hint">Der eine Quellordner unterhalb von <code id="rootHint">/dataroot</code>, der auf neue Downloads überwacht wird.</p>
-			<button id="addSourceBtn" class="btn" type="button">＋ Quellordner wählen</button>
+			<h2 data-i18n="sources_title">Quellordner</h2>
+			<p class="hint"><span data-i18n="sources_hint">Der eine Quellordner unterhalb von</span> <code id="rootHint">/dataroot</code>, <span data-i18n="sources_hint2">der auf neue Downloads überwacht wird.</span></p>
+			<button id="addSourceBtn" class="btn" type="button" data-i18n="source_add">＋ Quellordner wählen</button>
 			<ul id="sourceList" class="list"></ul>
 
-			<h2>Ziel-Bibliotheken</h2>
-			<p class="hint">Zielordner für Filme, Serien und Dokumentationen – Pfad per Ordnerauswahl.</p>
-			<button id="addLibraryBtn" class="btn" type="button">＋ Bibliothek anlegen</button>
+			<h2 data-i18n="libs_title">Ziel-Bibliotheken</h2>
+			<p class="hint" data-i18n="libs_hint">Zielordner für Filme, Serien und Dokumentationen – Pfad per Ordnerauswahl.</p>
+			<button id="addLibraryBtn" class="btn" type="button" data-i18n="lib_add">＋ Bibliothek anlegen</button>
 			<ul id="libraryList" class="list"></ul>
 
-			<h2>KI &amp; Verhalten</h2>
+			<h2 data-i18n="ai_title">KI &amp; Verhalten</h2>
 			<form id="settingsForm" class="stacked-form">
-				<label>KI Endpoint (Base URL)
+				<label><span data-i18n="ai_base_url">KI Endpoint (Base URL)</span>
 					<input type="text" id="aiBaseUrl" placeholder="https://<resource>.openai.azure.com" />
 				</label>
-				<label>Deployment / Modell
+				<label><span data-i18n="ai_model">Deployment / Modell</span>
 					<input type="text" id="aiModel" placeholder="gpt-4o-mini" />
 				</label>
-				<label>Azure API-Version <small>(leer lassen für reine OpenAI-API)</small>
+				<label><span data-i18n="ai_api_version">Azure API-Version</span> <small data-i18n="ai_api_version_hint">(leer lassen für reine OpenAI-API)</small>
 					<input type="text" id="aiApiVersion" placeholder="2024-06-01" />
 				</label>
-				<label>API-Key <small id="keyHint"></small>
+				<label><span data-i18n="ai_api_key">API-Key</span> <small id="keyHint"></small>
 					<input type="password" id="aiApiKey" placeholder="••••••••" autocomplete="off" />
 				</label>
-				<label>Schwellwert für automatisches Verschieben: <strong id="thresholdValue">90%</strong>
+				<label><span data-i18n="threshold">Schwellwert für automatisches Verschieben:</span> <strong id="thresholdValue">90%</strong>
 					<input type="range" id="threshold" min="0" max="100" step="1" value="90" />
 				</label>
 				<label class="checkbox">
-					<input type="checkbox" id="autoMove" checked /> Automatisches Verschieben aktiv
+					<input type="checkbox" id="autoMove" checked /> <span data-i18n="auto_move">Automatisches Verschieben aktiv</span>
 				</label>
-				<label>Ignorierte Ordner/Dateien <small>(eine pro Zeile; Teiltext oder Glob, z. B. _UNPACK, sample, *.txt)</small>
+				<label><span data-i18n="ignore">Ignorierte Ordner/Dateien</span> <small data-i18n="ignore_hint">(eine pro Zeile; Teiltext oder Glob, z. B. _UNPACK, sample, *.txt)</small>
 					<textarea id="ignorePatterns" rows="4" placeholder="_UNPACK&#10;sample"></textarea>
 				</label>
 			</form>
+		</section>
+
+		<section id="about" class="panel">
+			<h2 data-i18n="about_title">Über AutoFileMover</h2>
+			<p class="hint" data-i18n="about_desc">Selbst gehosteter Dienst, der heruntergeladene Medien per KI klassifiziert und in die passende Bibliothek verschiebt.</p>
+			<ul class="list about-list">
+				<li><span data-i18n="about_version">Version</span><code id="aboutVersion">–</code></li>
+				<li><span data-i18n="about_commit">Commit</span><code id="aboutCommit">–</code></li>
+				<li><span data-i18n="about_built">Erstellt</span><code id="aboutDate">–</code></li>
+				<li><span data-i18n="about_go">Go</span><code id="aboutGo">–</code></li>
+			</ul>
+			<p><a href="https://github.com/daknoblo/AutoFileMover" target="_blank" rel="noopener" class="btn secondary" data-i18n="about_repo">Repository auf GitHub</a></p>
 		</section>
 	</main>
 
@@ -127,7 +148,13 @@
 	</div>
 
 
+	<footer class="site-footer">
+		<span>AutoFileMover · <span id="footerVersion">dev</span></span>
+		<a href="https://github.com/daknoblo/AutoFileMover" target="_blank" rel="noopener">github.com/daknoblo/AutoFileMover</a>
+	</footer>
+
 	<div id="toast" class="toast"></div>
+	<script src="i18n.js"></script>
 	<script src="app.js"></script>
 </body>
 </html>

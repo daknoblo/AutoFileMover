@@ -45,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 
 	// API.
 	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("GET /api/version", s.handleVersion)
 	mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 
@@ -59,6 +60,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/items", s.handleListItems)
 	mux.HandleFunc("POST /api/items/{id}/confirm", s.handleConfirmItem)
+	mux.HandleFunc("POST /api/items/{id}/target", s.handleSetItemTarget)
+	mux.HandleFunc("POST /api/items/{id}/file-action", s.handleFileAction)
 	mux.HandleFunc("POST /api/items/{id}/reject", s.handleRejectItem)
 	mux.HandleFunc("DELETE /api/items/{id}", s.handleDeleteItem)
 

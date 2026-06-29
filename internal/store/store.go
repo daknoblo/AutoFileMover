@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -51,11 +52,29 @@ type Library struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// File describes a single file inside a detected item.
+// File-level action values: the engine plans one of these per file.
+const (
+	FileActionMove   = "move"
+	FileActionDelete = "delete"
+	FileActionKeep   = "keep"
+)
+
+// File describes a single file inside a detected item and the action planned
+// for it by the AI classification.
 type File struct {
 	RelPath string `json:"rel_path"`
 	Size    int64  `json:"size"`
 	Ext     string `json:"ext"`
+	// Action is the planned action: move, delete or keep. Empty means undecided.
+	Action string `json:"action"`
+	// Probability is the per-file confidence (0..1).
+	Probability float64 `json:"probability"`
+	// Reason is the AI's short justification for the action.
+	Reason string `json:"reason"`
+	// TargetPath is the resolved destination for a "move" file.
+	TargetPath string `json:"target_path"`
+	// Done reports whether the planned action has already been carried out.
+	Done bool `json:"done"`
 }
 
 // Item is a detected download entry and its classification/move state.
@@ -74,6 +93,12 @@ type Item struct {
 	ErrorMessage    string    `json:"error_message"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// IsSingleFile reports whether the item is a single loose file rather than a
+// folder (its only file equals the source path's base name).
+func (it *Item) IsSingleFile() bool {
+	return len(it.Files) == 1 && it.Files[0].RelPath == filepath.Base(it.SourcePath)
 }
 
 // Open opens (or creates) the database at path and applies migrations.

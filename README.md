@@ -36,6 +36,25 @@ Web-Oberfläche mit (für Betrieb hinter einem Reverse Proxy gedacht).
 - Dateien werden **verschoben** (move), bei unterschiedlichen Dateisystemen
   automatisch per copy + delete (Cross-Device-Fallback).
 
+### Entscheidung pro Datei
+
+Ein Quellordner enthält oft mehrere Dateien (Film, Sample, NFO …). Die KI bewertet
+**jede Datei einzeln** und schlägt eine Aktion mit Wahrscheinlichkeit vor:
+
+- `move` – die eigentliche Mediendatei (größtes Video + Untertitel) → ins Ziel.
+- `delete` – Sample-Clips, `.nfo`, Screenshots, Prüfsummen → endgültig löschen.
+- `keep` – unsicher → bleibt für manuelle Prüfung.
+
+In der Review-Queue erscheint der Ordner mit allen Dateien, Aktions-Label und
+Prozent. Bei sicherem Auto-Move wird der Film verschoben, Reste gelöscht und der
+leere Quellordner entfernt; im What-If lässt sich alles vorab pro Datei steuern.
+
+### Sprache & Über
+
+Die Oberfläche ist zweisprachig (Deutsch/Englisch, Umschalter im Header). Der
+**Über**-Tab zeigt Version, Commit, Build-Datum und Go-Version; Header/Footer
+verlinken auf das Repository.
+
 ## Schnellstart (Docker Compose)
 
 `docker-compose.yml` anpassen (insbesondere das Media-Volume) und starten:
@@ -110,7 +129,23 @@ Die UI ist anschließend unter Port `8080` erreichbar. Der Dev Container setzt
 ```bash
 go build ./...
 go vet ./...
+go test ./...
 ```
+
+## Dokumentation
+
+- [docs/installation.md](docs/installation.md)
+- [docs/configuration.md](docs/configuration.md)
+- [docs/architecture.md](docs/architecture.md)
+- [docs/development.md](docs/development.md)
+
+## Sicherheit
+
+- Keine eingebaute Authentifizierung – hinter Reverse Proxy/VPN betreiben.
+- API-Key wird in der DB gespeichert, nie an die UI zurückgegeben.
+- Pfade werden gegen `AFM_MEDIA_ROOT` validiert; Datei-Aktionen wirken nur auf
+  bereits gescannte Dateien. Löschen ist endgültig (vorher What-If nutzen).
+- Container läuft als non-root Distroless-Image mit eigenem Healthcheck.
 
 ## Container-Image (GitHub Action)
 
@@ -132,7 +167,8 @@ internal/scanner/     # Download-Erkennung & Datei-Auslesen
 internal/mover/       # Verschieben mit Cross-Device-Fallback
 internal/engine/      # Orchestrierung: scan → classify → decide → move/queue
 internal/watcher/     # fsnotify-Überwachung + periodischer Scan
-internal/web/         # REST-API + eingebettete Web-UI
+internal/web/         # REST-API + eingebettete Web-UI (DE/EN)
+internal/version/     # Build-Metadaten (ldflags)
 ```
 
 ## Hinweise zu Rechten

@@ -138,13 +138,17 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 	if ok && lib != nil {
 		id := lib.ID
 		item.TargetLibraryID = &id
-		item.TargetPath = filepath.Join(destDir, c.Name)
+		item.TargetPath = destDir
 	} else if reason != "" {
 		item.Reasoning = strings.TrimSpace(item.Reasoning + " | " + reason)
 	}
 
-	autoMove := settings.AutoMove && ok && res.Confidence >= settings.Threshold
-	if !autoMove {
+	// Map the per-file AI decisions onto the scanned files and resolve a target
+	// path for every file that should move.
+	applyDecisions(item.Files, res.Files, destDir)
+
+	canAuto := settings.AutoMove && ok && res.Confidence >= settings.Threshold && hasMovable(item.Files)
+	if !canAuto {
 		item.Status = store.StatusPendingReview
 		return e.store.UpsertItem(ctx, item)
 	}
@@ -152,32 +156,30 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 	// What-if mode: confident enough, but do not touch the filesystem.
 	if settings.DryRun {
 		item.Status = store.StatusPendingReview
-		item.Reasoning = strings.TrimSpace("[What-If] würde automatisch verschoben nach " + item.TargetPath + " | " + item.Reasoning)
-		e.log.Info("what-if: would auto-move", "name", c.Name, "dest", item.TargetPath, "confidence", res.Confidence)
+		item.Reasoning = strings.TrimSpace("[What-If] würde automatisch ausführen → " + destDir + " | " + item.Reasoning)
+		e.log.Info("what-if: would auto-process", "name", c.Name, "dest", destDir, "confidence", res.Confidence)
 		return e.store.UpsertItem(ctx, item)
 	}
 
-	// Confident enough: move now.
+	// Confident enough: execute the per-file plan now.
 	item.Status = store.StatusMoving
 	if err := e.store.UpsertItem(ctx, item); err != nil {
 		return err
 	}
-	finalPath, err := mover.Move(c.Path, destDir)
-	if err != nil {
+	if err := e.executePlan(item); err != nil {
 		item.Status = store.StatusError
 		item.ErrorMessage = err.Error()
 		return e.store.UpsertItem(ctx, item)
 	}
-	item.TargetPath = finalPath
 	item.Status = store.StatusAutoMoved
 	item.ErrorMessage = ""
-	e.log.Info("auto-moved item", "name", c.Name, "dest", finalPath, "confidence", res.Confidence)
+	e.log.Info("auto-processed item", "name", c.Name, "dest", destDir, "confidence", res.Confidence)
 	return e.store.UpsertItem(ctx, item)
 }
 
-// ConfirmItem moves an item to the chosen library (and optional sub-folder for
-// series) after manual review.
-func (e *Engine) ConfirmItem(ctx context.Context, id, libraryID int64, subFolder string) error {
+// ApplyPlan carries out every planned move/delete for an item, then removes the
+// emptied source folder. Used by the "Alles ausführen" button after review.
+func (e *Engine) ApplyPlan(ctx context.Context, id int64) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -185,8 +187,154 @@ func (e *Engine) ConfirmItem(ctx context.Context, id, libraryID int64, subFolder
 	if err != nil || item == nil {
 		return fmt.Errorf("item not found")
 	}
-	if settings, err := e.store.LoadAppSettings(ctx); err == nil && settings.DryRun {
-		return fmt.Errorf("What-If-Modus aktiv: es werden keine Dateien verschoben")
+	if !hasMovable(item.Files) {
+		return fmt.Errorf("kein Ziel aufgelöst – bitte zuerst eine Bibliothek/Datei wählen")
+	}
+	_ = e.store.UpdateItemStatus(ctx, id, store.StatusMoving, "")
+	if err := e.executePlan(item); err != nil {
+		_ = e.store.UpdateItemStatus(ctx, id, store.StatusError, err.Error())
+		return err
+	}
+	item.Status = store.StatusConfirmed
+	item.ErrorMessage = ""
+	e.log.Info("plan applied", "name", item.Name)
+	return e.store.UpsertItem(ctx, item)
+}
+
+// ApplyFileAction performs a single planned action (move or delete) for one file
+// inside an item, even while What-If is enabled (an explicit manual override).
+func (e *Engine) ApplyFileAction(ctx context.Context, id int64, relPath, action string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	item, err := e.store.GetItem(ctx, id)
+	if err != nil || item == nil {
+		return fmt.Errorf("item not found")
+	}
+	idx := -1
+	for i := range item.Files {
+		if item.Files[i].RelPath == relPath {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("file not found in item")
+	}
+	if err := e.execFile(item, &item.Files[idx], action); err != nil {
+		return err
+	}
+	e.finalize(item)
+	return e.store.UpsertItem(ctx, item)
+}
+
+// executePlan runs every undecided move/delete file then cleans up.
+func (e *Engine) executePlan(item *store.Item) error {
+	for i := range item.Files {
+		f := &item.Files[i]
+		if f.Done || (f.Action != store.FileActionMove && f.Action != store.FileActionDelete) {
+			continue
+		}
+		if err := e.execFile(item, f, f.Action); err != nil {
+			return err
+		}
+	}
+	e.finalize(item)
+	return nil
+}
+
+// execFile moves or deletes a single file and marks it done.
+func (e *Engine) execFile(item *store.Item, f *store.File, action string) error {
+	src := filepath.Join(item.SourcePath, f.RelPath)
+	if item.IsSingleFile() {
+		src = item.SourcePath
+	}
+	switch action {
+	case store.FileActionMove:
+		dest := f.TargetPath
+		if dest == "" && item.TargetPath != "" {
+			dest = filepath.Join(item.TargetPath, filepath.Base(f.RelPath))
+		}
+		if dest == "" {
+			return fmt.Errorf("kein Zielordner für %s", f.RelPath)
+		}
+		if _, err := mover.Move(src, filepath.Dir(dest)); err != nil {
+			return err
+		}
+		f.TargetPath = dest
+		e.log.Info("moved file", "file", f.RelPath, "dest", dest)
+	case store.FileActionDelete:
+		if err := mover.Delete(src); err != nil {
+			return err
+		}
+		e.log.Info("deleted file", "file", src)
+	default:
+		return fmt.Errorf("nichts zu tun für %s", f.RelPath)
+	}
+	f.Action = action
+	f.Done = true
+	return nil
+}
+
+// finalize removes the emptied source folder once nothing is left to process.
+func (e *Engine) finalize(item *store.Item) {
+	for i := range item.Files {
+		if !item.Files[i].Done && (item.Files[i].Action == store.FileActionMove || item.Files[i].Action == store.FileActionDelete) {
+			return // work remaining
+		}
+	}
+	if !item.IsSingleFile() {
+		_ = mover.RemoveIfEmpty(item.SourcePath)
+	}
+}
+
+// applyDecisions maps the AI per-file decisions onto the item files and resolves
+// a destination path for every file that should move into destDir.
+func applyDecisions(files []store.File, decisions []ai.FileDecision, destDir string) {
+	byPath := make(map[string]ai.FileDecision, len(decisions))
+	for _, d := range decisions {
+		byPath[d.Path] = d
+	}
+	for i := range files {
+		d, ok := byPath[files[i].RelPath]
+		if !ok {
+			files[i].Action = store.FileActionKeep
+			continue
+		}
+		files[i].Action = d.Action
+		files[i].Probability = d.Confidence
+		files[i].Reason = d.Reason
+		if d.Action == store.FileActionMove && destDir != "" {
+			files[i].TargetPath = filepath.Join(destDir, filepath.Base(files[i].RelPath))
+		}
+	}
+}
+
+// hasMovable reports whether at least one file is planned to move with a target.
+func hasMovable(files []store.File) bool {
+	for _, f := range files {
+		if f.Action == store.FileActionMove && f.TargetPath != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// RejectItem marks an item as rejected without moving anything.
+func (e *Engine) RejectItem(ctx context.Context, id int64) error {
+	return e.store.UpdateItemStatus(ctx, id, store.StatusRejected, "")
+}
+
+// SetItemTarget assigns a target library (and optional series sub-folder) to an
+// item and recomputes the destination for every file planned to move. Used when
+// the AI could not resolve a target and the user picks one during review.
+func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFolder string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	item, err := e.store.GetItem(ctx, id)
+	if err != nil || item == nil {
+		return fmt.Errorf("item not found")
 	}
 	lib, err := e.store.GetLibrary(ctx, libraryID)
 	if err != nil {
@@ -196,26 +344,17 @@ func (e *Engine) ConfirmItem(ctx context.Context, id, libraryID int64, subFolder
 	if subFolder != "" {
 		destDir = filepath.Join(lib.Path, subFolder)
 	}
-	if _, err := os.Stat(item.SourcePath); err != nil {
-		_ = e.store.UpdateItemStatus(ctx, id, store.StatusError, "source no longer exists")
-		return fmt.Errorf("source no longer exists: %s", item.SourcePath)
+	if info, err := os.Stat(destDir); err != nil || !info.IsDir() {
+		return fmt.Errorf("Zielordner existiert nicht: %s", destDir)
 	}
-
-	_ = e.store.UpdateItemStatus(ctx, id, store.StatusMoving, "")
-	finalPath, err := mover.Move(item.SourcePath, destDir)
-	if err != nil {
-		_ = e.store.UpdateItemStatus(ctx, id, store.StatusError, err.Error())
-		return err
+	item.TargetLibraryID = &lib.ID
+	item.TargetPath = destDir
+	for i := range item.Files {
+		if item.Files[i].Action == store.FileActionMove && !item.Files[i].Done {
+			item.Files[i].TargetPath = filepath.Join(destDir, filepath.Base(item.Files[i].RelPath))
+		}
 	}
-	libID := lib.ID
-	_ = e.store.UpdateItemTarget(ctx, id, &libID, finalPath)
-	e.log.Info("confirmed move", "name", item.Name, "dest", finalPath)
-	return e.store.UpdateItemStatus(ctx, id, store.StatusConfirmed, "")
-}
-
-// RejectItem marks an item as rejected without moving anything.
-func (e *Engine) RejectItem(ctx context.Context, id int64) error {
-	return e.store.UpdateItemStatus(ctx, id, store.StatusRejected, "")
+	return e.store.UpsertItem(ctx, item)
 }
 
 // resolveTarget maps a classification result to a concrete library and
@@ -250,9 +389,9 @@ func (e *Engine) resolveTarget(res *ai.Result, libs []store.Library) (lib *store
 func (e *Engine) buildRequest(ctx context.Context, c scanner.Candidate, libs []store.Library, sourcePath string) ai.Request {
 	notes, _ := e.store.FolderNotesByPath(ctx)
 
-	files := make([]string, 0, len(c.Files))
+	files := make([]ai.FileInput, 0, len(c.Files))
 	for _, f := range c.Files {
-		files = append(files, f.RelPath)
+		files = append(files, ai.FileInput{Path: f.RelPath, SizeBytes: f.Size})
 	}
 	infos := make([]ai.LibraryInfo, 0, len(libs))
 	for _, l := range libs {

@@ -25,9 +25,10 @@ type Candidate struct {
 	LastModified time.Time
 }
 
-// ScanSource returns the candidate items directly inside sourcePath. Entries
-// whose name matches an ignore pattern are skipped, and files matching a
-// pattern are excluded from each candidate's file list.
+// ScanSource returns the candidate items directly inside sourcePath. Top-level
+// entries whose name matches an ignore pattern are skipped entirely. Files
+// inside a candidate are always listed (samples included) so the AI can decide
+// per file what to keep, move or delete.
 func ScanSource(sourcePath string, ignore []string) ([]Candidate, error) {
 	entries, err := os.ReadDir(sourcePath)
 	if err != nil {
@@ -40,10 +41,10 @@ func ScanSource(sourcePath string, ignore []string) ([]Candidate, error) {
 			continue // skip hidden/partial files
 		}
 		if matchesAny(name, ignore) {
-			continue // skip ignored folders/files (e.g. _UNPACK, sample)
+			continue // skip ignored top-level folders (e.g. _UNPACK)
 		}
 		full := filepath.Join(sourcePath, name)
-		c, err := inspect(full, e.IsDir(), ignore)
+		c, err := inspect(full, e.IsDir())
 		if err != nil {
 			continue // unreadable entry; skip
 		}
@@ -74,7 +75,7 @@ func matchesAny(name string, ignore []string) bool {
 	return false
 }
 
-func inspect(path string, isDir bool, ignore []string) (Candidate, error) {
+func inspect(path string, isDir bool) (Candidate, error) {
 	c := Candidate{Name: filepath.Base(path), Path: path, IsDir: isDir}
 	if !isDir {
 		info, err := os.Stat(path)
@@ -101,9 +102,6 @@ func inspect(path string, isDir bool, ignore []string) (Candidate, error) {
 		info, err := d.Info()
 		if err != nil {
 			return nil
-		}
-		if matchesAny(info.Name(), ignore) {
-			return nil // skip ignored files (e.g. sample)
 		}
 		rel, _ := filepath.Rel(path, p)
 		c.Files = append(c.Files, store.File{
