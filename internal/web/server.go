@@ -64,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Folder browser & per-folder descriptions (AI context).
 	mux.HandleFunc("GET /api/browse", s.handleBrowse)
+	mux.HandleFunc("GET /api/folder-notes", s.handleListFolderNotes)
 	mux.HandleFunc("PUT /api/folder-notes", s.handleSetFolderNote)
 
 	// Static UI.

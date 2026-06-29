@@ -187,7 +187,32 @@ function historyCard(item) {
 }
 
 // ---- Sources ----
+let folderNotes = {};
+
+async function loadFolderNotes() {
+	const notes = (await api("GET", "/folder-notes")) || [];
+	folderNotes = {};
+	notes.forEach((n) => { folderNotes[n.path] = n.description; });
+}
+
+function descRow(path) {
+	const input = el("input", { type: "text", class: "folder-desc", placeholder: "Beschreibung als KI-Kontext…" });
+	input.value = folderNotes[path] || "";
+	const save = el("button", { class: "btn small", type: "button", text: "Speichern" });
+	save.addEventListener("click", async () => {
+		try {
+			await api("PUT", "/folder-notes", { path, description: input.value.trim() });
+			folderNotes[path] = input.value.trim();
+			toast("Beschreibung gespeichert");
+		} catch (e) {
+			toast(e.message, true);
+		}
+	});
+	return el("div", { class: "desc-row" }, [input, save]);
+}
+
 async function loadSources() {
+	await loadFolderNotes();
 	const sources = await api("GET", "/sources");
 	const list = document.getElementById("sourceList");
 	list.innerHTML = "";
@@ -201,25 +226,18 @@ async function loadSources() {
 				toast(e.message, true);
 			}
 		});
-		list.appendChild(el("li", {}, [el("span", { text: s.path }), del]));
+		list.appendChild(el("li", { class: "folder-item" }, [
+			el("div", { class: "folder-head" }, [el("span", { text: s.path }), del]),
+			descRow(s.path),
+		]));
 	});
 }
 
-document.getElementById("sourceForm").addEventListener("submit", async (e) => {
-	e.preventDefault();
-	const input = document.getElementById("sourcePath");
-	try {
-		await api("POST", "/sources", { path: input.value.trim() });
-		input.value = "";
-		loadSources();
-		toast("Quellordner hinzugefügt");
-	} catch (err) {
-		toast(err.message, true);
-	}
-});
+document.getElementById("addSourceBtn").addEventListener("click", () => openPicker("source"));
 
 // ---- Libraries ----
 async function loadLibraries() {
+	await loadFolderNotes();
 	libraries = (await api("GET", "/libraries")) || [];
 	const list = document.getElementById("libraryList");
 	list.innerHTML = "";
@@ -233,28 +251,18 @@ async function loadLibraries() {
 				toast(e.message, true);
 			}
 		});
-		list.appendChild(el("li", {}, [
-			el("span", {}, [el("strong", { text: l.name }), el("span", { class: "meta", text: ` ${l.kind} · ${l.path}` })]),
-			del,
+		list.appendChild(el("li", { class: "folder-item" }, [
+			el("div", { class: "folder-head" }, [
+				el("span", {}, [el("strong", { text: l.name }), el("span", { class: "meta", text: ` ${l.kind} · ${l.path}` })]),
+				del,
+			]),
+			descRow(l.path),
 		]));
 	});
 }
 
-document.getElementById("libraryForm").addEventListener("submit", async (e) => {
-	e.preventDefault();
-	const name = document.getElementById("libName");
-	const kind = document.getElementById("libKind");
-	const path = document.getElementById("libPath");
-	try {
-		await api("POST", "/libraries", { name: name.value.trim(), kind: kind.value, path: path.value.trim() });
-		name.value = "";
-		path.value = "";
-		loadLibraries();
-		toast("Bibliothek hinzugefügt");
-	} catch (err) {
-		toast(err.message, true);
-	}
-});
+document.getElementById("addLibraryBtn").addEventListener("click", () => openPicker("library"));
+
 
 // ---- Settings ----
 async function loadSettings() {
@@ -327,46 +335,75 @@ async function refreshAll() {
 	await loadItems();
 }
 
-// ---- Folder browser & descriptions ----
-let currentBrowsePath = "";
-let currentBrowseParent = "";
+// ---- Folder picker modal (sources & libraries) ----
+let pickerMode = "source";
+let pickerCurrent = "";
+let pickerParent = "";
 
-async function loadBrowse(path) {
+async function openPicker(mode) {
+	pickerMode = mode;
+	document.getElementById("pickerTitle").textContent =
+		mode === "library" ? "Bibliothek anlegen" : "Quellordner wählen";
+	document.getElementById("libFields").hidden = mode !== "library";
+	document.getElementById("pickerDesc").value = "";
+	document.getElementById("libName").value = "";
+	document.getElementById("libKind").value = "movie";
+	document.getElementById("pickerModal").hidden = false;
+	await pickerLoad("");
+}
+
+function closePicker() {
+	document.getElementById("pickerModal").hidden = true;
+}
+
+async function pickerLoad(path) {
 	const q = path ? "?path=" + encodeURIComponent(path) : "";
 	const data = await api("GET", "/browse" + q);
-	currentBrowsePath = data.path;
-	currentBrowseParent = data.parent;
-	document.getElementById("browsePath").textContent = data.path;
-	document.getElementById("browseUp").disabled = data.at_root;
-
-	const list = document.getElementById("browseList");
-	list.innerHTML = "";
-	if (data.entries.length === 0) {
-		list.appendChild(el("li", { class: "hint", text: "Keine Unterordner." }));
+	pickerCurrent = data.path;
+	pickerParent = data.parent;
+	document.getElementById("pickerPath").textContent = data.path;
+	document.getElementById("pickerSelectedPath").textContent = data.path;
+	document.getElementById("pickerUp").disabled = data.at_root;
+	if (data.entries.length && pickerMode === "library") {
+		const suggested = data.entries[0].name;
+		const nameField = document.getElementById("libName");
+		if (!nameField.value) nameField.value = suggested;
 	}
+	const list = document.getElementById("pickerList");
+	list.innerHTML = "";
+	if (data.entries.length === 0) list.appendChild(el("li", { class: "hint", text: "Keine Unterordner." }));
 	data.entries.forEach((entry) => {
 		const open = el("button", { class: "btn small secondary folder-open", type: "button", text: "📁 " + entry.name });
-		open.addEventListener("click", () => loadBrowse(entry.path));
-
-		const desc = el("input", { type: "text", class: "folder-desc", placeholder: "Beschreibung als KI-Kontext…" });
-		desc.value = entry.description || "";
-
-		const save = el("button", { class: "btn small", type: "button", text: "Speichern" });
-		save.addEventListener("click", async () => {
-			try {
-				await api("PUT", "/folder-notes", { path: entry.path, description: desc.value.trim() });
-				toast("Beschreibung gespeichert");
-			} catch (e) {
-				toast(e.message, true);
-			}
-		});
-
-		list.appendChild(el("li", { class: "browse-item" }, [open, desc, save]));
+		open.addEventListener("click", () => pickerLoad(entry.path));
+		list.appendChild(el("li", { class: "browse-item" }, [open]));
 	});
 }
 
-document.getElementById("browseUp").addEventListener("click", () => {
-	if (currentBrowseParent) loadBrowse(currentBrowseParent);
+document.getElementById("pickerUp").addEventListener("click", () => { if (pickerParent) pickerLoad(pickerParent); });
+document.getElementById("pickerCancel").addEventListener("click", closePicker);
+
+document.getElementById("pickerConfirm").addEventListener("click", async () => {
+	const path = pickerCurrent;
+	const desc = document.getElementById("pickerDesc").value.trim();
+	try {
+		if (pickerMode === "source") {
+			await api("POST", "/sources", { path });
+			if (desc) await api("PUT", "/folder-notes", { path, description: desc });
+			await loadSources();
+			toast("Quellordner hinzugefügt");
+		} else {
+			const name = document.getElementById("libName").value.trim();
+			const kind = document.getElementById("libKind").value;
+			if (!name) return toast("Bitte einen Namen angeben", true);
+			await api("POST", "/libraries", { name, kind, path });
+			if (desc) await api("PUT", "/folder-notes", { path, description: desc });
+			await loadLibraries();
+			toast("Bibliothek angelegt");
+		}
+		closePicker();
+	} catch (err) {
+		toast(err.message, true);
+	}
 });
 
 async function init() {
@@ -375,7 +412,10 @@ async function init() {
 		await loadSources();
 		await loadLibraries();
 		await loadItems();
-		await loadBrowse("");
+		try {
+			const root = await api("GET", "/browse");
+			document.getElementById("rootHint").textContent = root.path;
+		} catch (_) { /* ignore */ }
 	} catch (e) {
 		toast(e.message, true);
 	}
