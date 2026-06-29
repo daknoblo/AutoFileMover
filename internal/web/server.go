@@ -63,6 +63,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/items/{id}/target", s.handleSetItemTarget)
 	mux.HandleFunc("POST /api/items/{id}/file-action", s.handleFileAction)
 	mux.HandleFunc("POST /api/items/{id}/file-plan", s.handlePlanFileAction)
+	mux.HandleFunc("POST /api/items/{id}/reclassify", s.handleReclassifyItem)
 	mux.HandleFunc("POST /api/items/{id}/reject", s.handleRejectItem)
 	mux.HandleFunc("DELETE /api/items/{id}", s.handleDeleteItem)
 

@@ -64,6 +64,12 @@ document.querySelectorAll(".tab").forEach((tab) => {
 	});
 });
 
+// Clicking the logo / app name returns to the review queue (home).
+document.getElementById("brandHome").addEventListener("click", () => {
+	const reviewTab = document.querySelector('.tab[data-tab="review"]');
+	if (reviewTab) reviewTab.click();
+});
+
 // ---- Items ----
 async function loadItems() {
 	const items = await api("GET", "/items");
@@ -120,7 +126,8 @@ function fileRows(item, interactive) {
 			btns.push(del);
 			acts = el("div", { class: "frow-acts" }, btns);
 		}
-		box.appendChild(el("div", { class: "frow" }, [meta, targetEl, acts]));
+		const info = el("div", { class: "frow-info" }, [meta, targetEl]);
+		box.appendChild(el("div", { class: "frow" }, [info, acts]));
 	});
 	return box;
 }
@@ -173,8 +180,14 @@ function reviewCard(item) {
 		children.push(el("div", { class: "card-actions" }, [libSelect, subSelect, setBtn]));
 	}
 
+	const reBtn = el("button", { class: "btn small secondary", text: t("reanalyze") });
+	reBtn.addEventListener("click", async () => {
+		try { await api("POST", `/items/${item.id}/reclassify`); toast(t("reanalyzed")); refreshAll(); }
+		catch (e) { toast(e.message, true); }
+	});
 	const applyBtn = el("button", { class: "btn small", text: t("apply_plan") });
-	applyBtn.disabled = !hasWork || needsTarget;
+	applyBtn.disabled = !hasWork || needsTarget || dryRunActive;
+	if (dryRunActive) applyBtn.title = t("whatif_active");
 	applyBtn.addEventListener("click", async () => {
 		try { await api("POST", `/items/${item.id}/confirm`); toast(t("applied")); refreshAll(); }
 		catch (e) { toast(e.message, true); }
@@ -184,7 +197,7 @@ function reviewCard(item) {
 		try { await api("POST", `/items/${item.id}/reject`); refreshAll(); }
 		catch (e) { toast(e.message, true); }
 	});
-	children.push(el("div", { class: "card-actions" }, [applyBtn, rejectBtn]));
+	children.push(el("div", { class: "card-actions" }, [reBtn, applyBtn, rejectBtn]));
 
 	return el("div", { class: "card" }, children);
 }
@@ -287,6 +300,7 @@ document.getElementById("addLibraryBtn").addEventListener("click", () => openPic
 
 
 // ---- Settings ----
+let dryRunActive = false;
 async function loadSettings() {
 	const s = await api("GET", "/settings");
 	document.getElementById("aiBaseUrl").value = s.ai_base_url || "";
@@ -295,14 +309,16 @@ async function loadSettings() {
 	document.getElementById("threshold").value = Math.round((s.threshold ?? 0.9) * 100);
 	document.getElementById("thresholdValue").textContent = Math.round((s.threshold ?? 0.9) * 100) + "%";
 	document.getElementById("autoMove").checked = !!s.auto_move;
+	document.getElementById("aiContext").value = (s.ai_context || "");
 	document.getElementById("ignorePatterns").value = (s.ignore_patterns || "");
 	document.getElementById("keyHint").textContent = s.has_api_key ? t("key_saved") : t("key_unset");
 	applyDryRun(!!s.dry_run);
 }
 
 function applyDryRun(enabled) {
+	dryRunActive = enabled;
 	document.getElementById("dryRun").checked = enabled;
-	document.getElementById("dryRunBanner").hidden = !enabled;
+	document.getElementById("dryRunBadge").hidden = !enabled;
 }
 
 document.getElementById("dryRun").addEventListener("change", async (e) => {
@@ -328,6 +344,7 @@ async function saveSettings() {
 		ai_api_version: document.getElementById("aiApiVersion").value.trim(),
 		threshold: parseInt(document.getElementById("threshold").value, 10) / 100,
 		auto_move: document.getElementById("autoMove").checked,
+		ai_context: document.getElementById("aiContext").value,
 		ignore_patterns: document.getElementById("ignorePatterns").value,
 	};
 	const key = document.getElementById("aiApiKey").value;
@@ -350,7 +367,7 @@ function autoSave() {
 	saveTimer = setTimeout(saveSettings, 600);
 }
 
-["aiBaseUrl", "aiModel", "aiApiVersion", "ignorePatterns"].forEach((id) =>
+["aiBaseUrl", "aiModel", "aiApiVersion", "aiContext", "ignorePatterns"].forEach((id) =>
 	document.getElementById(id).addEventListener("input", autoSave));
 document.getElementById("aiApiKey").addEventListener("change", saveSettings);
 document.getElementById("autoMove").addEventListener("change", saveSettings);
