@@ -23,8 +23,6 @@
 	<nav class="tabs">
 		<button class="tab active" data-tab="review">Review-Queue <span id="reviewCount" class="badge"></span></button>
 		<button class="tab" data-tab="history">Verlauf</button>
-		<button class="tab" data-tab="sources">Quellordner</button>
-		<button class="tab" data-tab="libraries">Bibliotheken</button>
 		<button class="tab" data-tab="settings">Einstellungen</button>
 	</nav>
 
@@ -40,34 +38,18 @@
 			<div id="historyList" class="cards"></div>
 		</section>
 
-		<section id="sources" class="panel">
+		<section id="settings" class="panel active-settings">
 			<h2>Quellordner</h2>
-			<p class="hint">Ordner, die auf neue Downloads überwacht werden.</p>
-			<form id="sourceForm" class="inline-form">
-				<input type="text" id="sourcePath" placeholder="/dataroot/Downloads" required />
-				<button type="submit" class="btn">Hinzufügen</button>
-			</form>
+			<p class="hint">Ordner unterhalb von <code id="rootHint">/dataroot</code>, die auf neue Downloads überwacht werden.</p>
+			<button id="addSourceBtn" class="btn" type="button">＋ Quellordner wählen</button>
 			<ul id="sourceList" class="list"></ul>
-		</section>
 
-		<section id="libraries" class="panel">
 			<h2>Ziel-Bibliotheken</h2>
-			<p class="hint">Zielordner für Filme, Serien und Dokumentationen.</p>
-			<form id="libraryForm" class="inline-form">
-				<input type="text" id="libName" placeholder="Name (z. B. Filme)" required />
-				<select id="libKind">
-					<option value="movie">Film</option>
-					<option value="series">Serie</option>
-					<option value="documentary">Dokumentation</option>
-				</select>
-				<input type="text" id="libPath" placeholder="/dataroot/Filme" required />
-				<button type="submit" class="btn">Hinzufügen</button>
-			</form>
+			<p class="hint">Zielordner für Filme, Serien und Dokumentationen – Pfad per Ordnerauswahl.</p>
+			<button id="addLibraryBtn" class="btn" type="button">＋ Bibliothek anlegen</button>
 			<ul id="libraryList" class="list"></ul>
-		</section>
 
-		<section id="settings" class="panel">
-			<h2>Einstellungen</h2>
+			<h2>KI &amp; Verhalten</h2>
 			<form id="settingsForm" class="stacked-form">
 				<label>KI Endpoint (Base URL)
 					<input type="text" id="aiBaseUrl" placeholder="https://<resource>.openai.azure.com" />
@@ -89,19 +71,39 @@
 				</label>
 				<button type="submit" class="btn">Speichern</button>
 			</form>
-
-			<h2>Datei-Navigation &amp; Ordner-Kontext</h2>
-			<p class="hint">Navigiere durch deinen Medienordner. Zu jedem Ordner kannst du eine Beschreibung
-				hinterlegen, die als Kontext an den KI-Endpoint mitgesendet wird.</p>
-			<div class="browser">
-				<div class="browser-bar">
-					<button id="browseUp" class="btn small secondary" type="button">▲ Übergeordnet</button>
-					<span id="browsePath" class="browse-path"></span>
-				</div>
-				<ul id="browseList" class="browse-list"></ul>
-			</div>
 		</section>
 	</main>
+
+	<!-- Folder picker modal (used for sources and libraries) -->
+	<div id="pickerModal" class="modal" hidden>
+		<div class="modal-box">
+			<h3 id="pickerTitle">Ordner wählen</h3>
+			<div class="browser-bar">
+				<button id="pickerUp" class="btn small secondary" type="button">▲ Übergeordnet</button>
+				<span id="pickerPath" class="browse-path"></span>
+			</div>
+			<ul id="pickerList" class="browse-list"></ul>
+			<div id="pickerSelected" class="picker-selected">Aktueller Ordner: <code id="pickerSelectedPath"></code></div>
+			<div id="libFields" class="stacked-form" hidden>
+				<label>Name <input type="text" id="libName" placeholder="z. B. Filme" /></label>
+				<label>Typ
+					<select id="libKind">
+						<option value="movie">Film</option>
+						<option value="series">Serie</option>
+						<option value="documentary">Dokumentation</option>
+					</select>
+				</label>
+			</div>
+			<label class="picker-desc">Beschreibung (KI-Kontext, optional)
+				<input type="text" id="pickerDesc" placeholder="z. B. Alle deutschen Dokumentationen" />
+			</label>
+			<div class="modal-actions">
+				<button id="pickerCancel" class="btn secondary" type="button">Abbrechen</button>
+				<button id="pickerConfirm" class="btn" type="button">Diesen Ordner verwenden</button>
+			</div>
+		</div>
+	</div>
+
 
 	<div id="toast" class="toast"></div>
 	<script src="app.js"></script>

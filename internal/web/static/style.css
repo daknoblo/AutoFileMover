@@ -116,6 +116,13 @@ input, select {
 }
 .list li .meta { color: var(--muted); font-size: 13px; }
 
+/* Folder list items with editable description */
+.list li.folder-item { flex-direction: column; align-items: stretch; gap: 8px; }
+.folder-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.desc-row { display: flex; gap: 8px; }
+.desc-row .folder-desc { flex: 1; min-width: 120px; }
+
+
 .cards { display: flex; flex-direction: column; gap: 12px; }
 
 .card {
@@ -214,4 +221,32 @@ input, select {
 .browse-item:last-child { border-bottom: none; }
 .folder-open { white-space: nowrap; min-width: 160px; text-align: left; }
 .folder-desc { flex: 1; min-width: 120px; }
+
+/* Modal picker */
+.modal {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, .55);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 50;
+}
+.modal[hidden] { display: none; }
+.modal-box {
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	padding: 20px;
+	width: min(560px, 92vw);
+	max-height: 86vh;
+	overflow: auto;
+}
+.modal-box h3 { margin-top: 0; }
+.modal-box .browse-list { max-height: 280px; overflow: auto; }
+.picker-selected { font-size: 13px; color: var(--muted); margin: 10px 0; }
+.picker-selected code { color: var(--text); }
+.picker-desc { display: flex; flex-direction: column; gap: 6px; font-size: 14px; margin-top: 8px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
 

@@ -393,6 +393,18 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleListFolderNotes(w http.ResponseWriter, r *http.Request) {
+	notes, err := s.store.ListFolderNotes(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if notes == nil {
+		notes = []store.FolderNote{}
+	}
+	writeJSON(w, http.StatusOK, notes)
+}
+
 func (s *Server) handleSetFolderNote(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Path        string `json:"path"`
