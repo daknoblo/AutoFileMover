@@ -1,16 +1,17 @@
 "use strict";
 
-const STATUS_LABELS = {
-	pending_review: "Prüfen",
-	auto_moved: "Automatisch verschoben",
-	confirmed: "Bestätigt verschoben",
-	moving: "Wird verschoben…",
-	error: "Fehler",
-	rejected: "Abgelehnt",
-	skipped: "Übersprungen",
-};
+function statusLabel(s) { return t("status_" + s) || s; }
+function actionLabel(a) { return t("action_" + a) || a; }
 
 let libraries = [];
+
+function fmtSize(n) {
+	if (!n) return "";
+	const u = ["B", "KB", "MB", "GB", "TB"];
+	let i = 0;
+	while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+	return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
+}
 
 async function api(method, path, body) {
 	const opts = { method, headers: {} };
@@ -73,19 +74,48 @@ async function loadItems() {
 
 	const reviewList = document.getElementById("reviewList");
 	reviewList.innerHTML = "";
-	if (review.length === 0) reviewList.appendChild(el("p", { class: "hint", text: "Nichts zu prüfen." }));
+	if (review.length === 0) reviewList.appendChild(el("p", { class: "hint", text: t("empty_review") }));
 	review.forEach((i) => reviewList.appendChild(reviewCard(i)));
 
 	const historyList = document.getElementById("historyList");
 	historyList.innerHTML = "";
-	if (history.length === 0) historyList.appendChild(el("p", { class: "hint", text: "Noch kein Verlauf." }));
+	if (history.length === 0) historyList.appendChild(el("p", { class: "hint", text: t("empty_history") }));
 	history.forEach((i) => historyList.appendChild(historyCard(i)));
 }
 
-function fileList(files) {
+function fileRows(item, interactive) {
 	const box = el("div", { class: "files" });
-	(files || []).slice(0, 50).forEach((f) => box.appendChild(el("div", { text: f.rel_path })));
+	(item.files || []).slice(0, 100).forEach((f) => {
+		const action = f.action || "keep";
+		const label = el("span", { class: "ftag " + action, text: actionLabel(action) });
+		const pct = f.probability ? Math.round(f.probability * 100) + "%" : "";
+		const prob = pct ? el("span", { class: "fprob " + probClass(f.probability), text: pct }) : null;
+		const meta = el("div", { class: "frow-meta" }, [
+			el("span", { class: "fname", text: f.rel_path }),
+			f.size ? el("span", { class: "fsize", text: fmtSize(f.size) }) : null,
+			label, prob,
+			f.done ? el("span", { class: "fdone", text: t("done") }) : null,
+		]);
+		let acts = null;
+		if (interactive && !f.done) {
+			const mv = el("button", { class: "btn tiny", text: t("btn_move") });
+			mv.addEventListener("click", () => fileAction(item, f.rel_path, "move"));
+			const del = el("button", { class: "btn tiny danger", text: t("btn_delete") });
+			del.addEventListener("click", () => fileAction(item, f.rel_path, "delete"));
+			acts = el("div", { class: "frow-acts" }, [mv, del]);
+		}
+		box.appendChild(el("div", { class: "frow" }, [meta, acts]));
+	});
 	return box;
+}
+
+async function fileAction(item, relPath, action) {
+	if (action === "delete" && !confirm(`„${relPath}“ ${t("confirm_delete")}`)) return;
+	try {
+		await api("POST", `/items/${item.id}/file-action`, { rel_path: relPath, action });
+		toast(action === "delete" ? t("deleted") : t("moved"));
+		refreshAll();
+	} catch (e) { toast(e.message, true); }
 }
 
 function reviewCard(item) {
@@ -94,87 +124,68 @@ function reviewCard(item) {
 		el("div", { class: "card-title", text: item.name }),
 		prob,
 	]);
-
 	const sub = el("div", { class: "card-sub", text:
-		`Typ: ${item.detected_type || "?"} · Status: ${STATUS_LABELS[item.status] || item.status}` });
+		`${t("t_type")}: ${item.detected_type || "?"} · ${t("t_status")}: ${statusLabel(item.status)}` });
+	const target = item.target_path ? el("div", { class: "card-sub", text: t("t_dest") + ": " + item.target_path }) : null;
 	const reason = item.reasoning ? el("div", { class: "card-sub", text: item.reasoning }) : null;
-	const errBox = item.error_message ? el("div", { class: "card-sub", text: "Fehler: " + item.error_message }) : null;
+	const errBox = item.error_message ? el("div", { class: "card-sub err", text: "Fehler: " + item.error_message }) : null;
 
-	// Target library select.
-	const libSelect = el("select");
-	libSelect.appendChild(el("option", { value: "", text: "— Bibliothek wählen —" }));
-	libraries.forEach((l) => {
-		const opt = el("option", { value: String(l.id), text: `${l.name} (${l.kind})` });
-		if (item.target_library_id && item.target_library_id === l.id) opt.selected = true;
-		libSelect.appendChild(opt);
-	});
+	const hasTarget = (item.files || []).some((f) => f.action === "move" && f.target_path);
+	const children = [head, sub, target, reason, errBox, fileRows(item, true)];
 
-	const subFolderSelect = el("select", { style: "display:none" });
-
-	async function refreshSubFolders() {
-		const libId = libSelect.value;
-		const lib = libraries.find((l) => String(l.id) === libId);
-		if (lib && lib.kind === "series") {
-			subFolderSelect.innerHTML = "";
-			subFolderSelect.style.display = "";
-			try {
-				const folders = await api("GET", `/libraries/${lib.id}/folders`);
-				subFolderSelect.appendChild(el("option", { value: "", text: "— Serienordner wählen —" }));
-				folders.forEach((f) => subFolderSelect.appendChild(el("option", { value: f, text: f })));
-			} catch (e) {
-				toast(e.message, true);
+	// Target picker (only needed when no destination resolved).
+	if (!hasTarget) {
+		const libSelect = el("select");
+		libSelect.appendChild(el("option", { value: "", text: t("choose_lib") }));
+		libraries.forEach((l) => libSelect.appendChild(el("option", { value: String(l.id), text: `${l.name} (${l.kind})` })));
+		const subSelect = el("select", { style: "display:none" });
+		libSelect.addEventListener("change", async () => {
+			const lib = libraries.find((l) => String(l.id) === libSelect.value);
+			subSelect.innerHTML = ""; subSelect.style.display = lib && lib.kind === "series" ? "" : "none";
+			if (lib && lib.kind === "series") {
+				const folders = await api("GET", `/libraries/${lib.id}/folders`).catch(() => []);
+				subSelect.appendChild(el("option", { value: "", text: t("choose_series") }));
+				folders.forEach((f) => subSelect.appendChild(el("option", { value: f, text: f })));
 			}
-		} else {
-			subFolderSelect.style.display = "none";
-			subFolderSelect.innerHTML = "";
-		}
+		});
+		const setBtn = el("button", { class: "btn small", text: t("set_target") });
+		setBtn.addEventListener("click", async () => {
+			const libId = parseInt(libSelect.value, 10);
+			if (!libId) return toast(t("need_lib"), true);
+			try {
+				await api("POST", `/items/${item.id}/target`, { library_id: libId, sub_folder: subSelect.value });
+				toast(t("target_set")); refreshAll();
+			} catch (e) { toast(e.message, true); }
+		});
+		children.push(el("div", { class: "card-actions" }, [libSelect, subSelect, setBtn]));
 	}
-	libSelect.addEventListener("change", refreshSubFolders);
 
-	const confirmBtn = el("button", { class: "btn small", text: "Verschieben" });
-	confirmBtn.addEventListener("click", async () => {
-		const libId = parseInt(libSelect.value, 10);
-		if (!libId) return toast("Bitte eine Bibliothek wählen", true);
-		const lib = libraries.find((l) => l.id === libId);
-		const subFolder = lib && lib.kind === "series" ? subFolderSelect.value : "";
-		if (lib && lib.kind === "series" && !subFolder) return toast("Bitte einen Serienordner wählen", true);
-		try {
-			await api("POST", `/items/${item.id}/confirm`, { library_id: libId, sub_folder: subFolder });
-			toast("Verschoben");
-			refreshAll();
-		} catch (e) {
-			toast(e.message, true);
-		}
+	const applyBtn = el("button", { class: "btn small", text: t("apply_plan") });
+	applyBtn.disabled = !hasTarget;
+	applyBtn.addEventListener("click", async () => {
+		try { await api("POST", `/items/${item.id}/confirm`); toast(t("applied")); refreshAll(); }
+		catch (e) { toast(e.message, true); }
 	});
-
-	const rejectBtn = el("button", { class: "btn small secondary", text: "Ablehnen" });
+	const rejectBtn = el("button", { class: "btn small secondary", text: t("reject") });
 	rejectBtn.addEventListener("click", async () => {
-		try {
-			await api("POST", `/items/${item.id}/reject`);
-			refreshAll();
-		} catch (e) {
-			toast(e.message, true);
-		}
+		try { await api("POST", `/items/${item.id}/reject`); refreshAll(); }
+		catch (e) { toast(e.message, true); }
 	});
+	children.push(el("div", { class: "card-actions" }, [applyBtn, rejectBtn]));
 
-	const actions = el("div", { class: "card-actions" }, [libSelect, subFolderSelect, confirmBtn, rejectBtn]);
-
-	const card = el("div", { class: "card" }, [head, sub, reason, errBox, fileList(item.files), actions]);
-	// Apply initial sub-folder visibility if a library was pre-selected.
-	refreshSubFolders();
-	return card;
+	return el("div", { class: "card" }, children);
 }
 
 function historyCard(item) {
 	const prob = el("span", { class: "prob " + probClass(item.probability), text: Math.round(item.probability * 100) + "%" });
 	const head = el("div", { class: "card-head" }, [
 		el("div", { class: "card-title", text: item.name }),
-		el("span", { class: "status", text: STATUS_LABELS[item.status] || item.status }),
+		el("span", { class: "status", text: statusLabel(item.status) }),
 	]);
 	const target = item.target_path ? el("div", { class: "card-sub", text: "→ " + item.target_path }) : null;
 	const meta = el("div", { class: "card-sub" }, [prob, " · " + (item.detected_type || "?")]);
 
-	const delBtn = el("button", { class: "btn small secondary", text: "Eintrag entfernen" });
+	const delBtn = el("button", { class: "btn small secondary", text: t("remove_entry") });
 	delBtn.addEventListener("click", async () => {
 		try {
 			await api("DELETE", `/items/${item.id}`);
@@ -184,7 +195,7 @@ function historyCard(item) {
 		}
 	});
 
-	return el("div", { class: "card" }, [head, meta, target, el("div", { class: "card-actions" }, [delBtn])]);
+	return el("div", { class: "card" }, [head, meta, target, fileRows(item, false), el("div", { class: "card-actions" }, [delBtn])]);
 }
 
 // ---- Sources ----
@@ -204,7 +215,7 @@ function descRow(path) {
 		try {
 			await api("PUT", "/folder-notes", { path, description: input.value.trim() });
 			folderNotes[path] = input.value.trim();
-			toast("Beschreibung gespeichert");
+			toast(t("desc_saved"));
 		} catch (e) {
 			toast(e.message, true);
 		}
@@ -217,7 +228,7 @@ async function loadSources() {
 	const list = document.getElementById("sourceList");
 	list.innerHTML = "";
 	(sources || []).forEach((s) => {
-		const del = el("button", { class: "btn small danger", text: "Entfernen" });
+		const del = el("button", { class: "btn small danger", text: t("remove") });
 		del.addEventListener("click", async () => {
 			try {
 				await api("DELETE", `/sources/${s.id}`);
@@ -228,7 +239,7 @@ async function loadSources() {
 		});
 		list.appendChild(el("li", {}, [el("span", { text: s.path }), del]));
 	});
-	document.getElementById("addSourceBtn").textContent = (sources && sources.length) ? "Quellordner ändern" : "＋ Quellordner wählen";
+	document.getElementById("addSourceBtn").textContent = (sources && sources.length) ? t("source_change") : t("source_add");
 }
 
 document.getElementById("addSourceBtn").addEventListener("click", () => openPicker("source"));
@@ -240,7 +251,7 @@ async function loadLibraries() {
 	const list = document.getElementById("libraryList");
 	list.innerHTML = "";
 	libraries.forEach((l) => {
-		const del = el("button", { class: "btn small danger", text: "Entfernen" });
+		const del = el("button", { class: "btn small danger", text: t("remove") });
 		del.addEventListener("click", async () => {
 			try {
 				await api("DELETE", `/libraries/${l.id}`);
@@ -272,7 +283,7 @@ async function loadSettings() {
 	document.getElementById("thresholdValue").textContent = Math.round((s.threshold ?? 0.9) * 100) + "%";
 	document.getElementById("autoMove").checked = !!s.auto_move;
 	document.getElementById("ignorePatterns").value = (s.ignore_patterns || "");
-	document.getElementById("keyHint").textContent = s.has_api_key ? "(gespeichert – leer lassen zum Beibehalten)" : "(noch nicht gesetzt)";
+	document.getElementById("keyHint").textContent = s.has_api_key ? t("key_saved") : t("key_unset");
 	applyDryRun(!!s.dry_run);
 }
 
@@ -286,7 +297,7 @@ document.getElementById("dryRun").addEventListener("change", async (e) => {
 	try {
 		await api("PUT", "/dry-run", { enabled });
 		applyDryRun(enabled);
-		toast(enabled ? "What-If-Modus aktiviert" : "What-If-Modus deaktiviert");
+		toast(enabled ? t("whatif_on") : t("whatif_off"));
 	} catch (err) {
 		e.target.checked = !enabled;
 		toast(err.message, true);
@@ -312,9 +323,9 @@ async function saveSettings() {
 		await api("PUT", "/settings", body);
 		if (key) {
 			document.getElementById("aiApiKey").value = "";
-			document.getElementById("keyHint").textContent = "(gespeichert – leer lassen zum Beibehalten)";
+			document.getElementById("keyHint").textContent = t("key_saved");
 		}
-		toast("Gespeichert");
+		toast(t("saved"));
 	} catch (err) {
 		toast(err.message, true);
 	}
@@ -336,7 +347,7 @@ document.getElementById("threshold").addEventListener("change", saveSettings);
 document.getElementById("scanBtn").addEventListener("click", async () => {
 	try {
 		await api("POST", "/scan");
-		toast("Scan gestartet");
+		toast(t("scan_started"));
 		setTimeout(loadItems, 1500);
 	} catch (e) {
 		toast(e.message, true);
@@ -381,6 +392,17 @@ async function refreshAll() {
 	await loadItems();
 }
 
+async function loadVersion() {
+	try {
+		const v = await api("GET", "/version");
+		document.getElementById("aboutVersion").textContent = v.version + (v.channel && v.channel !== "local" ? ` (${v.channel})` : "");
+		document.getElementById("aboutCommit").textContent = v.commit || "–";
+		document.getElementById("aboutDate").textContent = v.date || "–";
+		document.getElementById("aboutGo").textContent = v.go_version || "–";
+		document.getElementById("footerVersion").textContent = v.version || "dev";
+	} catch (_) { /* ignore */ }
+}
+
 // ---- Folder picker modal (sources & libraries) ----
 let pickerMode = "source";
 let pickerCurrent = "";
@@ -389,7 +411,7 @@ let pickerParent = "";
 async function openPicker(mode) {
 	pickerMode = mode;
 	document.getElementById("pickerTitle").textContent =
-		mode === "library" ? "Bibliothek anlegen" : "Quellordner wählen";
+		mode === "library" ? t("picker_lib") : t("picker_source");
 	document.getElementById("libFields").hidden = mode !== "library";
 	document.getElementById("pickerDescLabel").hidden = mode !== "library";
 	document.getElementById("pickerDesc").value = "";
@@ -417,7 +439,7 @@ async function pickerLoad(path) {
 	}
 	const list = document.getElementById("pickerList");
 	list.innerHTML = "";
-	if (data.entries.length === 0) list.appendChild(el("li", { class: "hint", text: "Keine Unterordner." }));
+	if (data.entries.length === 0) list.appendChild(el("li", { class: "hint", text: t("no_subfolders") }));
 	data.entries.forEach((entry) => {
 		const open = el("button", { class: "btn small secondary folder-open", type: "button", text: "📁 " + entry.name });
 		open.addEventListener("click", () => pickerLoad(entry.path));
@@ -437,15 +459,15 @@ document.getElementById("pickerConfirm").addEventListener("click", async () => {
 			for (const s of existing) await api("DELETE", `/sources/${s.id}`);
 			await api("POST", "/sources", { path });
 			await loadSources();
-			toast("Quellordner gesetzt");
+			toast(t("source_set"));
 		} else {
 			const name = document.getElementById("libName").value.trim();
 			const kind = document.getElementById("libKind").value;
-			if (!name) return toast("Bitte einen Namen angeben", true);
+			if (!name) return toast(t("need_name"), true);
 			await api("POST", "/libraries", { name, kind, path });
 			if (desc) await api("PUT", "/folder-notes", { path, description: desc });
 			await loadLibraries();
-			toast("Bibliothek angelegt");
+			toast(t("lib_created"));
 		}
 		closePicker();
 	} catch (err) {
@@ -454,6 +476,13 @@ document.getElementById("pickerConfirm").addEventListener("click", async () => {
 });
 
 async function init() {
+	document.getElementById("langSelect").value = currentLang();
+	document.getElementById("langSelect").addEventListener("change", (e) => {
+		setLang(e.target.value);
+		refreshAll();
+	});
+	applyI18n();
+	loadVersion();
 	try {
 		await loadSettings();
 		await loadSources();

@@ -12,6 +12,7 @@ import (
 
 	"github.com/daknoblo/AutoFileMover/internal/logbuf"
 	"github.com/daknoblo/AutoFileMover/internal/store"
+	"github.com/daknoblo/AutoFileMover/internal/version"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -64,6 +65,12 @@ func (s *Server) validatePath(p string) error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ---- Version ----
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, version.Get())
 }
 
 // ---- Settings ----
@@ -276,6 +283,21 @@ func (s *Server) handleConfirmItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	if err := s.engine.ApplyPlan(r.Context(), id); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "applied"})
+}
+
+// handleSetItemTarget assigns a target library (and optional series sub-folder)
+// to an item, used when the AI could not resolve a destination.
+func (s *Server) handleSetItemTarget(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 	var body struct {
 		LibraryID int64  `json:"library_id"`
 		SubFolder string `json:"sub_folder"`
@@ -288,11 +310,33 @@ func (s *Server) handleConfirmItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "library_id is required")
 		return
 	}
-	if err := s.engine.ConfirmItem(r.Context(), id, body.LibraryID, strings.TrimSpace(body.SubFolder)); err != nil {
+	if err := s.engine.SetItemTarget(r.Context(), id, body.LibraryID, strings.TrimSpace(body.SubFolder)); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "moved"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleFileAction runs a single file's move/delete, also when What-If is on.
+func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var body struct {
+		RelPath string `json:"rel_path"`
+		Action  string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if err := s.engine.ApplyFileAction(r.Context(), id, body.RelPath, body.Action); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "done"})
 }
 
 func (s *Server) handleRejectItem(w http.ResponseWriter, r *http.Request) {

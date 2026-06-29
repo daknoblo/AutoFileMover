@@ -12,7 +12,14 @@ RUN go mod download
 
 COPY . .
 ARG VERSION=dev
-RUN go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+ARG CHANNEL=local
+ARG COMMIT=unknown
+ARG DATE=unknown
+RUN go build -trimpath -ldflags "-s -w \
+      -X github.com/daknoblo/AutoFileMover/internal/version.Version=${VERSION} \
+      -X github.com/daknoblo/AutoFileMover/internal/version.Channel=${CHANNEL} \
+      -X github.com/daknoblo/AutoFileMover/internal/version.Commit=${COMMIT} \
+      -X github.com/daknoblo/AutoFileMover/internal/version.Date=${DATE}" \
     -o /out/autofilemover ./cmd/autofilemover
 
 # ---- Runtime stage ----
@@ -26,5 +33,9 @@ ENV AFM_HTTP_ADDR=:8080 \
     AFM_MEDIA_ROOT=/dataroot
 VOLUME ["/data"]
 EXPOSE 8080
+
+# The binary implements its own healthcheck (distroless has no curl/wget).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/autofilemover", "-healthcheck"]
 
 ENTRYPOINT ["/autofilemover"]

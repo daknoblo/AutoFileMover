@@ -41,6 +41,32 @@ func Move(src, destDir string) (string, error) {
 	return dest, nil
 }
 
+// Delete permanently removes a file or directory tree. It returns nil if the
+// path is already gone.
+func Delete(path string) error {
+	err := os.RemoveAll(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete: %w", err)
+	}
+	return nil
+}
+
+// RemoveIfEmpty removes dir only when it contains no remaining entries. It is a
+// no-op (returns nil) if the directory is missing or still has contents.
+func RemoveIfEmpty(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if len(entries) > 0 {
+		return nil
+	}
+	return os.Remove(dir)
+}
+
 func copyPath(src, dest string) error {
 	info, err := os.Lstat(src)
 	if err != nil {

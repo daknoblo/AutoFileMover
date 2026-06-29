@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,16 +19,24 @@ import (
 	"github.com/daknoblo/AutoFileMover/internal/engine"
 	"github.com/daknoblo/AutoFileMover/internal/logbuf"
 	"github.com/daknoblo/AutoFileMover/internal/store"
+	"github.com/daknoblo/AutoFileMover/internal/version"
 	"github.com/daknoblo/AutoFileMover/internal/watcher"
 	"github.com/daknoblo/AutoFileMover/internal/web"
 )
 
 func main() {
+	// The distroless runtime image has no shell, so the container HEALTHCHECK
+	// calls the binary itself with -healthcheck.
+	if len(os.Args) > 1 && (os.Args[1] == "-healthcheck" || os.Args[1] == "healthcheck") {
+		os.Exit(healthcheck())
+	}
+
 	cfg := config.Load()
 	levelVar := new(slog.LevelVar)
 	levelVar.Set(logbuf.ParseLevel(os.Getenv("AFM_LOG_LEVEL")))
 	logs := logbuf.New(1000, os.Stdout)
 	log := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: levelVar}))
+	log.Info("starting autofilemover", "version", version.Get().String())
 
 	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
 		log.Error("create data dir", "err", err)
@@ -64,6 +73,9 @@ func main() {
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
@@ -82,4 +94,28 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Error("http shutdown", "err", err)
 	}
+}
+
+// healthcheck performs a local request to /api/health and returns a process
+// exit code. It is used as the container HEALTHCHECK (the distroless image has
+// no shell or curl).
+func healthcheck() int {
+	addr := os.Getenv("AFM_HTTP_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		port = "8080"
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:" + port + "/api/health")
+	if err != nil {
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 1
+	}
+	return 0
 }
