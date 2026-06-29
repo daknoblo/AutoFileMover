@@ -78,10 +78,16 @@ header h1 { font-size: 20px; margin: 0; }
 }
 .badge:empty { display: none; }
 
-main { padding: 24px; max-width: 980px; }
+main { padding: 24px; }
 
-.panel { display: none; }
+.panel { display: none; max-width: 980px; }
 .panel.active { display: block; }
+
+/* Review uses the available width: each detected folder spans ~75% of screen. */
+#review.panel { max-width: none; }
+#review h2, #review .hint, #review .cards {
+	width: 75vw; max-width: 75vw; margin-left: auto; margin-right: auto;
+}
 
 h2 { margin-top: 0; }
 .hint { color: var(--muted); margin-top: -8px; font-size: 14px; }
@@ -165,11 +171,10 @@ textarea {
 /* Per-file plan rows */
 .files { max-height: 360px; }
 .frow {
-	display: flex; flex-direction: column; gap: 4px;
-	padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; margin: 6px 0;
+	display: flex; flex-direction: column; gap: 6px;
+	padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; margin: 6px 0;
 	background: var(--panel-2);
 }
-.frow-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .frow-target {
 	font-size: 12px; color: var(--green); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	word-break: break-all; padding-left: 2px;
@@ -179,7 +184,16 @@ textarea {
 .fname { color: var(--text); font-size: 13px; word-break: break-all; }
 .fsize { color: var(--muted); font-size: 12px; }
 .fdone { color: var(--green); font-size: 12px; }
-.frow-acts { display: flex; gap: 6px; flex-shrink: 0; }
+/* Action toggle buttons: neutral until selected, then coloured. */
+.frow-acts { display: flex; gap: 8px; justify-content: center; }
+.fbtn {
+	padding: 4px 14px; font-size: 12px; border-radius: 6px; cursor: pointer;
+	background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+	transition: background .15s, color .15s, border-color .15s;
+}
+.fbtn:hover { color: var(--text); border-color: var(--muted); }
+.fbtn.move.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.fbtn.delete.on { background: var(--red); border-color: var(--red); color: #fff; }
 .btn.tiny { padding: 3px 8px; font-size: 12px; }
 .ftag { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
 .ftag.move { background: rgba(79,140,255,.18); color: var(--accent); }

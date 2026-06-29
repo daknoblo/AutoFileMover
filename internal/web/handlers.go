@@ -345,6 +345,29 @@ func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "done"})
 }
 
+// handlePlanFileAction sets the planned action for a single file without
+// executing it; the actual move/delete happens later via confirm (ApplyPlan).
+func (s *Server) handlePlanFileAction(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var body struct {
+		RelPath string `json:"rel_path"`
+		Action  string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if err := s.engine.PlanFileAction(r.Context(), id, body.RelPath, body.Action); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "planned"})
+}
+
 func (s *Server) handleRejectItem(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
