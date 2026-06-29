@@ -13,6 +13,14 @@
 			<img src="icon.svg" alt="" class="logo" width="28" height="28" />
 			<h1>AutoFileMover</h1>
 		</div>
+		<div id="scanStatus" class="scan-status" hidden>
+			<div class="scan-text">
+				<span class="scan-label" data-i18n="scan_running">Scanne</span>
+				<span id="scanCurrent" class="scan-current"></span>
+			</div>
+			<div class="scan-bar"><div id="scanBarFill" class="scan-bar-fill"></div></div>
+			<span id="scanMeta" class="scan-meta"></span>
+		</div>
 		<div class="header-actions">
 			<label class="whatif" data-i18n-title="whatif_hint">
 				<input type="checkbox" id="dryRun" /> <span data-i18n="whatif">What-If-Modus</span>

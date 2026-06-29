@@ -114,6 +114,14 @@ func inspect(path string, isDir bool) (Candidate, error) {
 		}
 		return nil
 	})
+	// An empty folder has no files to derive a modification time from; fall back
+	// to the folder's own mod time so it still counts as stable and is surfaced
+	// as a (deletable) queue entry.
+	if latest.IsZero() {
+		if info, statErr := os.Stat(path); statErr == nil {
+			latest = info.ModTime()
+		}
+	}
 	c.LastModified = latest
 	return c, err
 }

@@ -73,6 +73,12 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, version.Get())
 }
 
+// ---- Scan status ----
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.engine.GetProgress())
+}
+
 // ---- Settings ----
 
 type settingsDTO struct {

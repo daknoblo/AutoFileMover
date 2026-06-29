@@ -87,30 +87,45 @@ function fileRows(item, interactive) {
 	const box = el("div", { class: "files" });
 	(item.files || []).slice(0, 100).forEach((f) => {
 		const action = f.action || "keep";
+		const isEmpty = !f.rel_path;
+		const name = isEmpty ? t("empty_folder") : f.rel_path;
 		const label = el("span", { class: "ftag " + action, text: actionLabel(action) });
 		const pct = f.probability ? Math.round(f.probability * 100) + "%" : "";
 		const prob = pct ? el("span", { class: "fprob " + probClass(f.probability), text: pct }) : null;
 		const meta = el("div", { class: "frow-meta" }, [
-			el("span", { class: "fname", text: f.rel_path }),
-			f.size ? el("span", { class: "fsize", text: fmtSize(f.size) }) : null,
+			el("span", { class: "fname", text: name }),
+			(!isEmpty && f.size) ? el("span", { class: "fsize", text: fmtSize(f.size) }) : null,
 			label, prob,
 			f.done ? el("span", { class: "fdone", text: t("done") }) : null,
 		]);
+		// Suggested target shown per file (replaces the per-folder dropdown).
+		let targetEl = null;
+		if (action === "move") {
+			targetEl = f.target_path
+				? el("div", { class: "frow-target", text: "→ " + f.target_path })
+				: el("div", { class: "frow-target none", text: t("no_target") });
+		}
 		let acts = null;
 		if (interactive && !f.done) {
-			const mv = el("button", { class: "btn tiny", text: t("btn_move") });
-			mv.addEventListener("click", () => fileAction(item, f.rel_path, "move"));
+			const btns = [];
+			if (!isEmpty) {
+				const mv = el("button", { class: "btn tiny", text: t("btn_move") });
+				mv.addEventListener("click", () => fileAction(item, f.rel_path, "move", name));
+				btns.push(mv);
+			}
 			const del = el("button", { class: "btn tiny danger", text: t("btn_delete") });
-			del.addEventListener("click", () => fileAction(item, f.rel_path, "delete"));
-			acts = el("div", { class: "frow-acts" }, [mv, del]);
+			del.addEventListener("click", () => fileAction(item, f.rel_path, "delete", name));
+			btns.push(del);
+			acts = el("div", { class: "frow-acts" }, btns);
 		}
-		box.appendChild(el("div", { class: "frow" }, [meta, acts]));
+		const top = el("div", { class: "frow-top" }, [meta, acts]);
+		box.appendChild(el("div", { class: "frow" }, [top, targetEl]));
 	});
 	return box;
 }
 
-async function fileAction(item, relPath, action) {
-	if (action === "delete" && !confirm(`„${relPath}“ ${t("confirm_delete")}`)) return;
+async function fileAction(item, relPath, action, name) {
+	if (action === "delete" && !confirm(`„${name || relPath}“ ${t("confirm_delete")}`)) return;
 	try {
 		await api("POST", `/items/${item.id}/file-action`, { rel_path: relPath, action });
 		toast(action === "delete" ? t("deleted") : t("moved"));
@@ -124,17 +139,15 @@ function reviewCard(item) {
 		el("div", { class: "card-title", text: item.name }),
 		prob,
 	]);
-	const sub = el("div", { class: "card-sub", text:
-		`${t("t_type")}: ${item.detected_type || "?"} · ${t("t_status")}: ${statusLabel(item.status)}` });
-	const target = item.target_path ? el("div", { class: "card-sub", text: t("t_dest") + ": " + item.target_path }) : null;
-	const reason = item.reasoning ? el("div", { class: "card-sub", text: item.reasoning }) : null;
-	const errBox = item.error_message ? el("div", { class: "card-sub err", text: "Fehler: " + item.error_message }) : null;
+	const errBox = item.error_message ? el("div", { class: "card-sub err", text: t("error") + ": " + item.error_message }) : null;
 
-	const hasTarget = (item.files || []).some((f) => f.action === "move" && f.target_path);
-	const children = [head, sub, target, reason, errBox, fileRows(item, true)];
+	const files = item.files || [];
+	const needsTarget = files.some((f) => f.action === "move" && !f.target_path && !f.done);
+	const hasWork = files.some((f) => (f.action === "move" || f.action === "delete") && !f.done);
+	const children = [head, errBox, fileRows(item, true)];
 
-	// Target picker (only needed when no destination resolved).
-	if (!hasTarget) {
+	// Fallback target picker — only when a file wants to move but has no target.
+	if (needsTarget) {
 		const libSelect = el("select");
 		libSelect.appendChild(el("option", { value: "", text: t("choose_lib") }));
 		libraries.forEach((l) => libSelect.appendChild(el("option", { value: String(l.id), text: `${l.name} (${l.kind})` })));
@@ -161,7 +174,7 @@ function reviewCard(item) {
 	}
 
 	const applyBtn = el("button", { class: "btn small", text: t("apply_plan") });
-	applyBtn.disabled = !hasTarget;
+	applyBtn.disabled = !hasWork || needsTarget;
 	applyBtn.addEventListener("click", async () => {
 		try { await api("POST", `/items/${item.id}/confirm`); toast(t("applied")); refreshAll(); }
 		catch (e) { toast(e.message, true); }
@@ -403,6 +416,31 @@ async function loadVersion() {
 	} catch (_) { /* ignore */ }
 }
 
+// ---- Scan status (header) ----
+let scanWasActive = false;
+function fmtEta(s) {
+	if (s <= 0) return "";
+	if (s < 60) return `${s}s`;
+	return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+async function loadStatus() {
+	try {
+		const p = await api("GET", "/status");
+		const box = document.getElementById("scanStatus");
+		if (p && p.active) {
+			box.hidden = false;
+			document.getElementById("scanCurrent").textContent = p.current || "";
+			document.getElementById("scanBarFill").style.width = (p.percent || 0) + "%";
+			const eta = p.eta_seconds ? ` · ${t("scan_eta")} ${fmtEta(p.eta_seconds)}` : "";
+			document.getElementById("scanMeta").textContent = `${p.done}/${p.total} · ${p.percent || 0}%${eta}`;
+			scanWasActive = true;
+		} else {
+			box.hidden = true;
+			if (scanWasActive) { scanWasActive = false; loadItems(); }
+		}
+	} catch (_) { /* ignore */ }
+}
+
 // ---- Folder picker modal (sources & libraries) ----
 let pickerMode = "source";
 let pickerCurrent = "";
@@ -483,6 +521,7 @@ async function init() {
 	});
 	applyI18n();
 	loadVersion();
+	loadStatus();
 	try {
 		await loadSettings();
 		await loadSources();
@@ -500,6 +539,7 @@ async function init() {
 		toast(e.message, true);
 	}
 	setInterval(loadItems, 10000);
+	setInterval(loadStatus, 1500);
 }
 
 init();
