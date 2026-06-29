@@ -39,6 +39,9 @@ type FileInput struct {
 type Request struct {
 	Name  string      `json:"name"`
 	Files []FileInput `json:"files"`
+	// GlobalContext is an always-sent description of what the files are and how
+	// to treat them (from settings). It guides every classification.
+	GlobalContext string `json:"global_context,omitempty"`
 	// SourceContext is an optional description of the source folder the item was
 	// found in, supplied by the user as additional context.
 	SourceContext string        `json:"source_context,omitempty"`
@@ -122,6 +125,11 @@ func (c *Client) Classify(ctx context.Context, req Request) (*Result, error) {
 
 func buildUserPrompt(req Request) string {
 	var b strings.Builder
+	if req.GlobalContext != "" {
+		b.WriteString("Context:\n")
+		b.WriteString(req.GlobalContext)
+		b.WriteString("\n\n")
+	}
 	b.WriteString("Downloaded item name:\n")
 	b.WriteString(req.Name)
 	if req.SourceContext != "" {

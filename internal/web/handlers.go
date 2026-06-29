@@ -91,6 +91,7 @@ type settingsDTO struct {
 	AutoMove     bool    `json:"auto_move"`
 	DryRun       bool    `json:"dry_run"`
 	Ignore       string  `json:"ignore_patterns"`
+	AIContext    string  `json:"ai_context"`
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +109,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		AutoMove:     a.AutoMove,
 		DryRun:       a.DryRun,
 		Ignore:       strings.Join(a.IgnorePatterns, "\n"),
+		AIContext:    a.AIContext,
 	})
 }
 
@@ -129,6 +131,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		Threshold:    dto.Threshold,
 		AutoMove:     dto.AutoMove,
 		IgnorePatterns: splitLines(dto.Ignore),
+		AIContext:      strings.TrimSpace(dto.AIContext),
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -366,6 +369,21 @@ func (s *Server) handlePlanFileAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "planned"})
+}
+
+// handleReclassifyItem re-runs the AI classification for one item and updates
+// the suggested per-file actions without executing anything.
+func (s *Server) handleReclassifyItem(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.engine.ReclassifyItem(r.Context(), id); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "reclassified"})
 }
 
 func (s *Server) handleRejectItem(w http.ResponseWriter, r *http.Request) {

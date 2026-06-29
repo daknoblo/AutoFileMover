@@ -199,7 +199,7 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 		return e.store.UpsertItem(ctx, item)
 	}
 
-	res, err := client.Classify(ctx, e.buildRequest(ctx, c, libs, sourcePath))
+	res, err := client.Classify(ctx, e.buildRequest(ctx, c.Name, c.Files, libs, sourcePath, settings.AIContext))
 	if err != nil {
 		item.Status = store.StatusError
 		item.ErrorMessage = err.Error()
@@ -266,6 +266,9 @@ func (e *Engine) ApplyPlan(ctx context.Context, id int64) error {
 	if err != nil || item == nil {
 		return fmt.Errorf("item not found")
 	}
+	if settings, err := e.store.LoadAppSettings(ctx); err == nil && settings.DryRun {
+		return fmt.Errorf("What-If-Modus aktiv: es werden keine Dateien verschoben oder gelöscht")
+	}
 	if !pendingWork(item.Files) {
 		return fmt.Errorf("nichts auszuführen")
 	}
@@ -283,8 +286,80 @@ func (e *Engine) ApplyPlan(ctx context.Context, id int64) error {
 	return e.store.UpsertItem(ctx, item)
 }
 
+// ReclassifyItem re-runs the AI classification for an existing review item and
+// updates the suggested per-file actions and target WITHOUT executing anything.
+// Progress is reported on the same status channel as a scan.
+func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	item, err := e.store.GetItem(ctx, id)
+	if err != nil || item == nil {
+		return fmt.Errorf("item not found")
+	}
+	hasReal := false
+	for _, f := range item.Files {
+		if f.RelPath != "" {
+			hasReal = true
+			break
+		}
+	}
+	if !hasReal {
+		return fmt.Errorf("nichts zu analysieren")
+	}
+
+	settings, err := e.store.LoadAppSettings(ctx)
+	if err != nil {
+		return err
+	}
+	client := ai.New(ai.Config{
+		BaseURL:    settings.AIBaseURL,
+		APIKey:     settings.AIAPIKey,
+		Model:      settings.AIModel,
+		APIVersion: settings.AIAPIVersion,
+	})
+	if !client.Configured() {
+		return fmt.Errorf("KI-Endpoint nicht konfiguriert")
+	}
+	libs, err := e.store.ListLibraries(ctx)
+	if err != nil {
+		return err
+	}
+
+	e.startProgress(1)
+	defer e.finishProgress()
+	e.updateProgress(0, item.Name)
+
+	sourcePath := filepath.Dir(item.SourcePath)
+	res, err := client.Classify(ctx, e.buildRequest(ctx, item.Name, item.Files, libs, sourcePath, settings.AIContext))
+	if err != nil {
+		return fmt.Errorf("classify: %w", err)
+	}
+
+	item.DetectedType = res.Type
+	item.Probability = res.Confidence
+	item.Reasoning = res.Reasoning
+	item.AIRaw = fmt.Sprintf("type=%s library=%s series_folder=%s title=%s confidence=%.3f",
+		res.Type, res.Library, res.SeriesFolder, res.Title, res.Confidence)
+
+	lib, destDir, ok, _ := e.resolveTarget(res, libs)
+	if ok && lib != nil {
+		lid := lib.ID
+		item.TargetLibraryID = &lid
+		item.TargetPath = destDir
+	} else {
+		item.TargetLibraryID = nil
+		item.TargetPath = ""
+	}
+	applyDecisions(item.Files, res.Files, destDir)
+	item.Status = store.StatusPendingReview
+	item.ErrorMessage = ""
+	e.log.Info("reclassified item", "name", item.Name, "confidence", res.Confidence)
+	return e.store.UpsertItem(ctx, item)
+}
+
 // ApplyFileAction performs a single planned action (move or delete) for one file
-// inside an item, even while What-If is enabled (an explicit manual override).
+// inside an item. It is blocked while What-If is enabled.
 func (e *Engine) ApplyFileAction(ctx context.Context, id int64, relPath, action string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -292,6 +367,9 @@ func (e *Engine) ApplyFileAction(ctx context.Context, id int64, relPath, action 
 	item, err := e.store.GetItem(ctx, id)
 	if err != nil || item == nil {
 		return fmt.Errorf("item not found")
+	}
+	if settings, err := e.store.LoadAppSettings(ctx); err == nil && settings.DryRun {
+		return fmt.Errorf("What-If-Modus aktiv: es werden keine Dateien verschoben oder gelöscht")
 	}
 	idx := -1
 	for i := range item.Files {
@@ -530,11 +608,14 @@ func (e *Engine) resolveTarget(res *ai.Result, libs []store.Library) (lib *store
 // buildRequest constructs the AI classification request, including existing
 // series folders and any user-provided folder descriptions so the model can
 // map to an existing show with extra context.
-func (e *Engine) buildRequest(ctx context.Context, c scanner.Candidate, libs []store.Library, sourcePath string) ai.Request {
+func (e *Engine) buildRequest(ctx context.Context, name string, srcFiles []store.File, libs []store.Library, sourcePath, globalContext string) ai.Request {
 	notes, _ := e.store.FolderNotesByPath(ctx)
 
-	files := make([]ai.FileInput, 0, len(c.Files))
-	for _, f := range c.Files {
+	files := make([]ai.FileInput, 0, len(srcFiles))
+	for _, f := range srcFiles {
+		if f.RelPath == "" {
+			continue // synthetic empty-folder marker, nothing to classify
+		}
 		files = append(files, ai.FileInput{Path: f.RelPath, SizeBytes: f.Size})
 	}
 	infos := make([]ai.LibraryInfo, 0, len(libs))
@@ -551,8 +632,9 @@ func (e *Engine) buildRequest(ctx context.Context, c scanner.Candidate, libs []s
 		infos = append(infos, info)
 	}
 	return ai.Request{
-		Name:          c.Name,
+		Name:          name,
 		Files:         files,
+		GlobalContext: globalContext,
 		SourceContext: notes[sourcePath],
 		Libraries:     infos,
 	}

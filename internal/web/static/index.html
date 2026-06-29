@@ -9,10 +9,10 @@
 </head>
 <body>
 	<header>
-		<div class="brand">
+		<button class="brand" id="brandHome" type="button" title="AutoFileMover">
 			<img src="icon.svg" alt="" class="logo" width="28" height="28" />
 			<h1>AutoFileMover</h1>
-		</div>
+		</button>
 		<div id="scanStatus" class="scan-status" hidden>
 			<div class="scan-text">
 				<span class="scan-label" data-i18n="scan_running">Scanne</span>
@@ -22,9 +22,7 @@
 			<span id="scanMeta" class="scan-meta"></span>
 		</div>
 		<div class="header-actions">
-			<label class="whatif" data-i18n-title="whatif_hint">
-				<input type="checkbox" id="dryRun" /> <span data-i18n="whatif">What-If-Modus</span>
-			</label>
+			<span id="dryRunBadge" class="whatif-badge" hidden data-i18n="whatif_active">What-If aktiv</span>
 			<select id="langSelect" class="lang" title="Language">
 				<option value="de">DE</option>
 				<option value="en">EN</option>
@@ -32,9 +30,6 @@
 			<button id="scanBtn" class="btn" data-i18n="scan_now">Jetzt scannen</button>
 		</div>
 	</header>
-	<div id="dryRunBanner" class="dryrun-banner" hidden data-i18n="whatif_banner">
-		What-If-Modus aktiv – es werden keine Dateien verschoben.
-	</div>
 
 	<nav class="tabs">
 		<button class="tab active" data-tab="review"><span data-i18n="tab_review">Review-Queue</span> <span id="reviewCount" class="badge"></span></button>
@@ -105,6 +100,13 @@
 				</label>
 				<label class="checkbox">
 					<input type="checkbox" id="autoMove" checked /> <span data-i18n="auto_move">Automatisches Verschieben aktiv</span>
+				</label>
+				<label class="checkbox" data-i18n-title="whatif_hint">
+					<input type="checkbox" id="dryRun" /> <span data-i18n="whatif">What-If-Modus</span>
+					<small data-i18n="whatif_hint">Im What-If-Modus werden keine Dateien verschoben.</small>
+				</label>
+				<label><span data-i18n="ai_context">KI-Kontext (immer mitgesendet)</span> <small data-i18n="ai_context_hint">Beschreibt der KI, worum es geht und wie Dateien behandelt werden.</small>
+					<textarea id="aiContext" rows="5" placeholder="…"></textarea>
 				</label>
 				<label><span data-i18n="ignore">Ignorierte Ordner/Dateien</span> <small data-i18n="ignore_hint">(eine pro Zeile; Teiltext oder Glob, z. B. _UNPACK, sample, *.txt)</small>
 					<textarea id="ignorePatterns" rows="4" placeholder="_UNPACK&#10;sample"></textarea>
