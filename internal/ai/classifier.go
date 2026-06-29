@@ -92,8 +92,12 @@ and decide which target library it belongs to, AND which contained files to keep
 Rules:
 - Determine the media type: "movie", "series", "documentary", or "unknown".
 - Choose the single best matching target library from the provided list by its exact name.
-- For a "series", you MUST pick "series_folder" from the chosen library's existing_folders list
-  that matches the show. If none of the existing folders match the show, set "series_folder" to "".
+- "series_folder" is the destination sub-folder INSIDE the chosen library. Look at that
+  library's existing_folders and pick the one that matches this title (ignore release tags,
+  separators and case, e.g. "The.Terminal.List.Dark.Wolf.S01E01" matches "The Terminal List").
+  For a "series" you MUST set "series_folder" to the matching existing folder; if none matches,
+  set it to "". For movies/documentaries set it only if a clearly matching folder exists, else "".
+  Always copy the folder name EXACTLY as it appears in existing_folders.
 - "confidence" is your overall certainty (0.0 to 1.0) that BOTH the type and the target are correct.
 - For EVERY file in the list, return one entry in "files" with the EXACT same path and an action:
     "move"   = the real wanted media (the largest main video, plus matching subtitles).

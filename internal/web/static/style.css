@@ -276,18 +276,30 @@ textarea {
 /* Header actions & what-if */
 .header-actions { display: flex; align-items: center; gap: 16px; }
 
-/* Header scan status */
+/* Header scan status (always visible) */
 .scan-status {
-	flex: 1; min-width: 0; max-width: 520px; margin: 0 24px;
-	display: flex; flex-direction: column; gap: 4px;
+	flex: 1; min-width: 0; max-width: 640px; margin: 0 24px;
+	display: flex; align-items: center; gap: 14px;
+	background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+	padding: 6px 12px;
 }
-.scan-status[hidden] { display: none; }
-.scan-text { display: flex; gap: 6px; font-size: 13px; color: var(--muted); min-width: 0; }
-.scan-label { flex-shrink: 0; }
-.scan-current { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.scan-bar { height: 6px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+.scan-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.scan-line { display: flex; gap: 6px; align-items: baseline; font-size: 13px; min-width: 0; }
+.scan-phase { font-weight: 600; flex-shrink: 0; }
+.scan-phase.idle { color: var(--muted); }
+.scan-phase.busy { color: var(--accent); }
+.scan-current { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.scan-bar { height: 5px; border-radius: 4px; background: var(--panel); overflow: hidden; }
+.scan-bar[hidden] { display: none; }
 .scan-bar-fill { height: 100%; width: 0; background: var(--accent); transition: width .4s ease; }
-.scan-meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.scan-meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Filesystem-operations health label */
+.fs-label { display: flex; align-items: center; gap: 6px; font-size: 12px; flex-shrink: 0; white-space: nowrap; cursor: default; }
+.fs-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.fs-label.ok .fs-dot { background: var(--green); }
+.fs-label.bad .fs-dot { background: var(--red); }
+.fs-label.ok .fs-text { color: var(--green); }
+.fs-label.bad .fs-text { color: var(--red); }
 .whatif {
 	display: flex;
 	align-items: center;

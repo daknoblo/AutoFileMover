@@ -104,11 +104,12 @@ function fileRows(item, interactive) {
 			prob,
 			f.done ? el("span", { class: "fdone", text: t("done") }) : null,
 		]);
-		// When the file will move, show its destination under the file name.
+		// When the file will move, show its destination FOLDER under the file name.
 		let targetEl = null;
 		if (action === "move") {
-			targetEl = f.target_path
-				? el("div", { class: "frow-target", text: "→ " + f.target_path })
+			const dir = f.target_path ? f.target_path.substring(0, f.target_path.lastIndexOf("/")) : "";
+			targetEl = dir
+				? el("div", { class: "frow-target", text: "→ " + dir })
 				: el("div", { class: "frow-target none", text: t("no_target") });
 		}
 		// Action toggles coloured by the AI decision: green=move, red=delete,
@@ -445,18 +446,34 @@ function fmtEta(s) {
 async function loadStatus() {
 	try {
 		const p = await api("GET", "/status");
-		const box = document.getElementById("scanStatus");
-		if (p && p.active) {
-			box.hidden = false;
-			document.getElementById("scanCurrent").textContent = p.current || "";
+		const phaseEl = document.getElementById("scanPhase");
+		const curEl = document.getElementById("scanCurrent");
+		const bar = document.getElementById("scanBar");
+		const meta = document.getElementById("scanMeta");
+		if (p.active) {
+			const classifying = p.phase === "classifying";
+			phaseEl.textContent = classifying ? t("phase_classifying") : t("phase_scanning");
+			phaseEl.className = "scan-phase busy";
+			curEl.textContent = p.current ? (classifying ? "· " + p.current : "") : "";
+			bar.hidden = !classifying || !p.total;
 			document.getElementById("scanBarFill").style.width = (p.percent || 0) + "%";
 			const eta = p.eta_seconds ? ` · ${t("scan_eta")} ${fmtEta(p.eta_seconds)}` : "";
-			document.getElementById("scanMeta").textContent = `${p.done}/${p.total} · ${p.percent || 0}%${eta}`;
+			meta.textContent = (classifying && p.total) ? `${p.done}/${p.total} · ${p.percent || 0}%${eta}` : "";
 			scanWasActive = true;
 		} else {
-			box.hidden = true;
+			phaseEl.textContent = t("phase_idle");
+			phaseEl.className = "scan-phase idle";
+			curEl.textContent = "";
+			bar.hidden = true;
+			meta.textContent = "";
 			if (scanWasActive) { scanWasActive = false; loadItems(); }
 		}
+		// Filesystem-operations health label.
+		const fsLabel = document.getElementById("fsLabel");
+		fsLabel.classList.toggle("ok", !!p.fs_writable);
+		fsLabel.classList.toggle("bad", !p.fs_writable);
+		fsLabel.title = p.fs_message || (p.fs_writable ? t("fs_ok") : t("fs_bad"));
+		document.getElementById("fsText").textContent = p.fs_writable ? t("fs_ok") : t("fs_bad");
 	} catch (_) { /* ignore */ }
 }
 

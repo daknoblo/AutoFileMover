@@ -67,6 +67,27 @@ func RemoveIfEmpty(dir string) error {
 	return os.Remove(dir)
 }
 
+// CheckWritable verifies that the process can actually create, move and delete
+// a file under dir — the exact operations used when sorting media. It creates a
+// tiny temp file, renames it and removes it, returning the first error.
+func CheckWritable(dir string) error {
+	f, err := os.CreateTemp(dir, ".afm-write-test-*")
+	if err != nil {
+		return fmt.Errorf("cannot create files in %s: %w", dir, err)
+	}
+	name := f.Name()
+	_ = f.Close()
+	moved := name + ".moved"
+	if err := os.Rename(name, moved); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("cannot move files in %s: %w", dir, err)
+	}
+	if err := os.Remove(moved); err != nil {
+		return fmt.Errorf("cannot delete files in %s: %w", dir, err)
+	}
+	return nil
+}
+
 func copyPath(src, dest string) error {
 	info, err := os.Lstat(src)
 	if err != nil {

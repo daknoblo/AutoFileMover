@@ -13,13 +13,18 @@
 			<img src="icon.svg" alt="" class="logo" width="28" height="28" />
 			<h1>AutoFileMover</h1>
 		</button>
-		<div id="scanStatus" class="scan-status" hidden>
-			<div class="scan-text">
-				<span class="scan-label" data-i18n="scan_running">Scanne</span>
-				<span id="scanCurrent" class="scan-current"></span>
+		<div id="scanStatus" class="scan-status">
+			<div class="scan-body">
+				<div class="scan-line">
+					<span id="scanPhase" class="scan-phase">Idle</span>
+					<span id="scanCurrent" class="scan-current"></span>
+				</div>
+				<div id="scanBar" class="scan-bar" hidden><div id="scanBarFill" class="scan-bar-fill"></div></div>
+				<span id="scanMeta" class="scan-meta"></span>
 			</div>
-			<div class="scan-bar"><div id="scanBarFill" class="scan-bar-fill"></div></div>
-			<span id="scanMeta" class="scan-meta"></span>
+			<div id="fsLabel" class="fs-label" title="">
+				<span class="fs-dot"></span><span id="fsText" class="fs-text">…</span>
+			</div>
 		</div>
 		<div class="header-actions">
 			<span id="dryRunBadge" class="whatif-badge" hidden data-i18n="whatif_active">What-If aktiv</span>
