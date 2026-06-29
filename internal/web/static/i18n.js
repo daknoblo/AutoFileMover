@@ -42,6 +42,7 @@ const I18N = {
 		create_folder: "Ordner anlegen", folder_created: "Ordner angelegt",
 		analyzing: "Analysiere…",
 		log_level_setting: "Log-Level", log_level_hint: "Detailgrad der Logs (DEBUG zeigt die KI-Anfragen).", log_level_set: "Log-Level:",
+		collapse_hint: "Zum Ein-/Ausklappen klicken",
 	},
 	en: {
 		whatif: "What-if mode", whatif_hint: "In what-if mode no files are moved.",
@@ -81,6 +82,7 @@ const I18N = {
 		create_folder: "Create folder", folder_created: "Folder created",
 		analyzing: "Analyzing…",
 		log_level_setting: "Log level", log_level_hint: "Log detail level (DEBUG shows the AI requests).", log_level_set: "Log level:",
+		collapse_hint: "Click to collapse/expand",
 	},
 };
 

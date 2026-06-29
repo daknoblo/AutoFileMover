@@ -27,6 +27,10 @@ header {
 	justify-content: space-between;
 	padding: 16px 24px;
 	border-bottom: 1px solid var(--border);
+	position: sticky;
+	top: 0;
+	z-index: 30;
+	background: var(--bg);
 }
 
 header h1 { font-size: 20px; margin: 0; }
@@ -180,6 +184,12 @@ textarea {
 }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .card-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+/* Collapsible folder sections */
+.card-head.collapsible { cursor: pointer; user-select: none; }
+.caret { color: var(--muted); font-size: 12px; flex-shrink: 0; transition: transform .15s ease; }
+.card.collapsed .caret { transform: rotate(-90deg); }
+.card.collapsed > *:not(.card-head) { display: none; }
+.card.collapsed { padding-bottom: 16px; }
 .card-sub { color: var(--muted); font-size: 13px; margin: 4px 0; }
 .files { color: var(--muted); font-size: 12px; max-height: 120px; overflow: auto; margin: 8px 0; }
 .files div { padding: 1px 0; }
