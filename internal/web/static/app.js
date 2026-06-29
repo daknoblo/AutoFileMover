@@ -200,8 +200,20 @@ function reviewCard(item) {
 
 	const reBtn = el("button", { class: "btn small secondary", text: t("reanalyze") });
 	reBtn.addEventListener("click", async () => {
-		try { await api("POST", `/items/${item.id}/reclassify`); toast(t("reanalyzed")); refreshAll(); }
-		catch (e) { toast(e.message, true); }
+		reBtn.disabled = true;
+		reBtn.classList.add("loading");
+		reBtn.textContent = t("analyzing");
+		toast(t("analyzing"));
+		try {
+			await api("POST", `/items/${item.id}/reclassify`);
+			toast(t("reanalyzed"));
+			refreshAll();
+		} catch (e) {
+			toast(e.message, true);
+			reBtn.disabled = false;
+			reBtn.classList.remove("loading");
+			reBtn.textContent = t("reanalyze");
+		}
 	});
 	const applyBtn = el("button", { class: "btn small", text: t("apply_plan") });
 	applyBtn.disabled = !hasWork || needsTarget || dryRunActive;
@@ -396,6 +408,7 @@ document.getElementById("scanBtn").addEventListener("click", async () => {
 	try {
 		await api("POST", "/scan");
 		toast(t("scan_started"));
+		loadStatus();
 		setTimeout(loadItems, 1500);
 	} catch (e) {
 		toast(e.message, true);

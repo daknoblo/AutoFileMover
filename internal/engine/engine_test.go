@@ -8,9 +8,38 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/daknoblo/AutoFileMover/internal/ai"
 	"github.com/daknoblo/AutoFileMover/internal/config"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 )
+
+func TestApplyDecisions(t *testing.T) {
+	files := []store.File{
+		{RelPath: "Show.S01E01.mkv"},           // exact path match
+		{RelPath: "subdir/Show.S01E01.nfo"},    // matched by base name only
+		{RelPath: "Show.S01E01.sample.mkv"},    // delete
+		{RelPath: "unmatched.txt"},             // no decision -> keep
+	}
+	decisions := []ai.FileDecision{
+		{Path: "Show.S01E01.mkv", Action: "move", Confidence: 0.97},
+		{Path: "Show.S01E01.nfo", Action: "delete", Confidence: 0.9},
+		{Path: "Show.S01E01.sample.mkv", Action: "delete", Confidence: 0.95},
+	}
+	applyDecisions(files, decisions, "/lib/Show")
+
+	if files[0].Action != store.FileActionMove || files[0].TargetPath != filepath.Join("/lib/Show", "Show.S01E01.mkv") {
+		t.Errorf("exact move mapping failed: %+v", files[0])
+	}
+	if files[1].Action != store.FileActionDelete {
+		t.Errorf("base-name fallback failed: %+v", files[1])
+	}
+	if files[2].Action != store.FileActionDelete {
+		t.Errorf("sample delete failed: %+v", files[2])
+	}
+	if files[3].Action != store.FileActionKeep {
+		t.Errorf("unmatched file should be keep: %+v", files[3])
+	}
+}
 
 func TestMatchSubfolder(t *testing.T) {
 	root := t.TempDir()

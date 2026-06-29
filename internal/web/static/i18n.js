@@ -40,6 +40,7 @@ const I18N = {
 		ai_context: "KI-Kontext (immer mitgesendet)", ai_context_hint: "Beschreibt der KI, worum es geht und wie Dateien behandelt werden.",
 		phase_idle: "Idle", phase_scanning: "Scanne Dateisystem…", phase_classifying: "KI prüft", fs_ok: "Dateisystem schreibbar", fs_bad: "Dateisystem nicht schreibbar",
 		create_folder: "Ordner anlegen", folder_created: "Ordner angelegt",
+		analyzing: "Analysiere…",
 	},
 	en: {
 		whatif: "What-if mode", whatif_hint: "In what-if mode no files are moved.",
@@ -77,6 +78,7 @@ const I18N = {
 		ai_context: "AI context (always sent)", ai_context_hint: "Tells the AI what the files are and how to handle them.",
 		phase_idle: "Idle", phase_scanning: "Scanning filesystem…", phase_classifying: "AI checking", fs_ok: "Filesystem writable", fs_bad: "Filesystem not writable",
 		create_folder: "Create folder", folder_created: "Folder created",
+		analyzing: "Analyzing…",
 	},
 };
 

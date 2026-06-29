@@ -110,6 +110,14 @@ h2 { margin-top: 0; }
 	font-size: 14px;
 }
 .btn:hover { background: var(--accent-2); }
+.btn:disabled { opacity: .6; cursor: default; }
+.btn.loading { position: relative; color: transparent; }
+.btn.loading::after {
+	content: ""; position: absolute; inset: 0; margin: auto; width: 12px; height: 12px;
+	border: 2px solid rgba(255,255,255,.5); border-top-color: #fff; border-radius: 50%;
+	animation: afm-spin .6s linear infinite;
+}
+@keyframes afm-spin { to { transform: rotate(360deg); } }
 .btn.secondary { background: var(--panel-2); border: 1px solid var(--border); }
 .btn.danger { background: var(--red); }
 .btn.small { padding: 4px 10px; font-size: 13px; }
