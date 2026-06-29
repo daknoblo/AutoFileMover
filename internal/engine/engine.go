@@ -168,15 +168,29 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 	if err != nil {
 		return err
 	}
+
+	settings, err := e.store.LoadAppSettings(ctx)
+	if err != nil {
+		return err
+	}
+	client := ai.New(ai.Config{
+		BaseURL:    settings.AIBaseURL,
+		APIKey:     settings.AIAPIKey,
+		Model:      settings.AIModel,
+		APIVersion: settings.AIAPIVersion,
+	})
+	aiConfigured := client.Configured()
+
 	if existing != nil {
 		switch existing.Status {
 		case store.StatusError:
 			// retry below
 		case store.StatusPendingReview:
 			// Re-classify in the background only if it was never classified yet
-			// (e.g. detected before the AI endpoint was configured). Already
-			// classified items keep the user's reviewed plan.
-			if existing.DetectedType != "" {
+			// (e.g. detected before the AI endpoint was configured) AND an AI
+			// endpoint is available. Otherwise keep the item as-is so a manually
+			// edited plan is never wiped by a re-scan.
+			if existing.DetectedType != "" || !aiConfigured {
 				return nil
 			}
 		default:
@@ -213,17 +227,7 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 		return e.store.UpsertItem(ctx, item)
 	}
 
-	settings, err := e.store.LoadAppSettings(ctx)
-	if err != nil {
-		return err
-	}
-	client := ai.New(ai.Config{
-		BaseURL:    settings.AIBaseURL,
-		APIKey:     settings.AIAPIKey,
-		Model:      settings.AIModel,
-		APIVersion: settings.AIAPIVersion,
-	})
-	if !client.Configured() {
+	if !aiConfigured {
 		item.Reasoning = "AI endpoint not configured; queued for manual review"
 		return e.store.UpsertItem(ctx, item)
 	}
@@ -247,8 +251,13 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 		id := lib.ID
 		item.TargetLibraryID = &id
 		item.TargetPath = destDir
-	} else if reason != "" {
-		item.Reasoning = strings.TrimSpace(item.Reasoning + " | " + reason)
+		item.SuggestedLibraryID = nil
+		item.SuggestedFolder = ""
+	} else {
+		if reason != "" {
+			item.Reasoning = strings.TrimSpace(item.Reasoning + " | " + reason)
+		}
+		e.suggestFolder(item, lib, res)
 	}
 
 	// Map the per-file AI decisions onto the scanned files and resolve a target
@@ -377,9 +386,12 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 		lid := lib.ID
 		item.TargetLibraryID = &lid
 		item.TargetPath = destDir
+		item.SuggestedLibraryID = nil
+		item.SuggestedFolder = ""
 	} else {
 		item.TargetLibraryID = nil
 		item.TargetPath = ""
+		e.suggestFolder(item, lib, res)
 	}
 	applyDecisions(item.Files, res.Files, destDir)
 	item.Status = store.StatusPendingReview
@@ -651,6 +663,75 @@ func matchSubfolder(root, name string) string {
 		}
 	}
 	return ""
+}
+
+// suggestFolder records the AI's proposed destination folder on the item when a
+// library matched but the show folder is missing, so the UI can offer to create
+// it. A nil library or empty name clears any previous suggestion.
+func (e *Engine) suggestFolder(item *store.Item, lib *store.Library, res *ai.Result) {
+	item.SuggestedLibraryID = nil
+	item.SuggestedFolder = ""
+	if lib == nil {
+		return
+	}
+	folder := strings.TrimSpace(res.SeriesFolder)
+	if folder == "" {
+		folder = sanitizeFolder(res.Title)
+	}
+	if folder == "" {
+		return
+	}
+	lid := lib.ID
+	item.SuggestedLibraryID = &lid
+	item.SuggestedFolder = folder
+}
+
+// sanitizeFolder turns an AI title into a safe single-segment folder name.
+func sanitizeFolder(title string) string {
+	t := strings.TrimSpace(title)
+	t = strings.ReplaceAll(t, "/", " ")
+	t = strings.ReplaceAll(t, "\\", " ")
+	t = strings.Trim(t, ". ")
+	return strings.TrimSpace(t)
+}
+
+// CreateTargetFolder creates the AI-suggested destination folder for an item and
+// sets it as the move target, recomputing each move file's destination.
+func (e *Engine) CreateTargetFolder(ctx context.Context, id int64) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	item, err := e.store.GetItem(ctx, id)
+	if err != nil || item == nil {
+		return fmt.Errorf("item not found")
+	}
+	if item.SuggestedLibraryID == nil || item.SuggestedFolder == "" {
+		return fmt.Errorf("kein Ordner zum Anlegen vorgeschlagen")
+	}
+	lib, err := e.store.GetLibrary(ctx, *item.SuggestedLibraryID)
+	if err != nil {
+		return fmt.Errorf("library not found")
+	}
+	dir := filepath.Join(lib.Path, item.SuggestedFolder)
+	// Safety: the new folder must be a direct child of the library path.
+	if filepath.Dir(dir) != filepath.Clean(lib.Path) {
+		return fmt.Errorf("ungültiger Ordnername")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("Ordner anlegen: %w", err)
+	}
+	lid := lib.ID
+	item.TargetLibraryID = &lid
+	item.TargetPath = dir
+	item.SuggestedLibraryID = nil
+	item.SuggestedFolder = ""
+	for i := range item.Files {
+		if item.Files[i].Action == store.FileActionMove && !item.Files[i].Done {
+			item.Files[i].TargetPath = filepath.Join(dir, filepath.Base(item.Files[i].RelPath))
+		}
+	}
+	e.log.Info("created target folder", "dir", dir, "item", item.Name)
+	return e.store.UpsertItem(ctx, item)
 }
 
 // buildRequest constructs the AI classification request, including existing

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -85,6 +86,11 @@ type Item struct {
 	DetectedType    string    `json:"detected_type"`
 	TargetLibraryID *int64    `json:"target_library_id"`
 	TargetPath      string    `json:"target_path"`
+	// SuggestedLibraryID and SuggestedFolder hold the AI's proposed destination
+	// when the matching folder does not exist yet, so the UI can offer to create
+	// it with one click.
+	SuggestedLibraryID *int64 `json:"suggested_library_id"`
+	SuggestedFolder    string `json:"suggested_folder"`
 	Probability     float64   `json:"probability"`
 	Status          string    `json:"status"`
 	Reasoning       string    `json:"reasoning"`
@@ -144,6 +150,8 @@ CREATE TABLE IF NOT EXISTS items (
 	detected_type     TEXT NOT NULL DEFAULT '',
 	target_library_id INTEGER,
 	target_path       TEXT NOT NULL DEFAULT '',
+	suggested_library_id INTEGER,
+	suggested_folder  TEXT NOT NULL DEFAULT '',
 	probability       REAL NOT NULL DEFAULT 0,
 	status            TEXT NOT NULL,
 	reasoning         TEXT NOT NULL DEFAULT '',
@@ -163,6 +171,16 @@ CREATE TABLE IF NOT EXISTS folder_notes (
 	_, err := s.db.Exec(schema)
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
+	}
+	// Columns added after the initial schema; ignore "duplicate column" on DBs
+	// that already have them.
+	for _, stmt := range []string{
+		`ALTER TABLE items ADD COLUMN suggested_library_id INTEGER`,
+		`ALTER TABLE items ADD COLUMN suggested_folder TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, aerr := s.db.Exec(stmt); aerr != nil && !strings.Contains(aerr.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate alter: %w", aerr)
+		}
 	}
 	return nil
 }
@@ -355,13 +373,16 @@ func (s *Store) UpsertItem(ctx context.Context, it *Item) error {
 	}
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO items(source_path, name, detected_type, target_library_id, target_path,
+	suggested_library_id, suggested_folder,
 	probability, status, reasoning, files_json, ai_raw, error_message, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(source_path) DO UPDATE SET
 	name = excluded.name,
 	detected_type = excluded.detected_type,
 	target_library_id = excluded.target_library_id,
 	target_path = excluded.target_path,
+	suggested_library_id = excluded.suggested_library_id,
+	suggested_folder = excluded.suggested_folder,
 	probability = excluded.probability,
 	status = excluded.status,
 	reasoning = excluded.reasoning,
@@ -370,6 +391,7 @@ ON CONFLICT(source_path) DO UPDATE SET
 	error_message = excluded.error_message,
 	updated_at = CURRENT_TIMESTAMP`,
 		it.SourcePath, it.Name, it.DetectedType, it.TargetLibraryID, it.TargetPath,
+		it.SuggestedLibraryID, it.SuggestedFolder,
 		it.Probability, it.Status, it.Reasoning, string(filesJSON), it.AIRaw, it.ErrorMessage)
 	if err != nil {
 		return err
@@ -411,6 +433,7 @@ func (s *Store) DeleteItem(ctx context.Context, id int64) error {
 }
 
 const itemSelect = `SELECT id, source_path, name, detected_type, target_library_id, target_path,
+	suggested_library_id, suggested_folder,
 	probability, status, reasoning, files_json, ai_raw, error_message, created_at, updated_at FROM items`
 
 type scanner interface {
@@ -421,7 +444,7 @@ func scanItem(row scanner) (*Item, error) {
 	var it Item
 	var filesJSON string
 	if err := row.Scan(&it.ID, &it.SourcePath, &it.Name, &it.DetectedType, &it.TargetLibraryID,
-		&it.TargetPath, &it.Probability, &it.Status, &it.Reasoning, &filesJSON, &it.AIRaw,
+		&it.TargetPath, &it.SuggestedLibraryID, &it.SuggestedFolder, &it.Probability, &it.Status, &it.Reasoning, &filesJSON, &it.AIRaw,
 		&it.ErrorMessage, &it.CreatedAt, &it.UpdatedAt); err != nil {
 		return nil, err
 	}
