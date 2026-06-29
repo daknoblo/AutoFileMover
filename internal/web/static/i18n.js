@@ -38,6 +38,7 @@ const I18N = {
 		scan_running: "Scanne", scan_eta: "noch", empty_folder: "Leerer Ordner", no_target: "kein Ziel", error: "Fehler",
 		whatif_active: "What-If aktiv", reanalyze: "KI-Abgleich", reanalyzed: "Neu klassifiziert",
 		ai_context: "KI-Kontext (immer mitgesendet)", ai_context_hint: "Beschreibt der KI, worum es geht und wie Dateien behandelt werden.",
+		phase_idle: "Idle", phase_scanning: "Scanne Dateisystem…", phase_classifying: "KI prüft", fs_ok: "Dateisystem schreibbar", fs_bad: "Dateisystem nicht schreibbar",
 	},
 	en: {
 		whatif: "What-if mode", whatif_hint: "In what-if mode no files are moved.",
@@ -73,6 +74,7 @@ const I18N = {
 		scan_running: "Scanning", scan_eta: "ETA", empty_folder: "Empty folder", no_target: "no target", error: "Error",
 		whatif_active: "What-if active", reanalyze: "Re-check with AI", reanalyzed: "Re-classified",
 		ai_context: "AI context (always sent)", ai_context_hint: "Tells the AI what the files are and how to handle them.",
+		phase_idle: "Idle", phase_scanning: "Scanning filesystem…", phase_classifying: "AI checking", fs_ok: "Filesystem writable", fs_bad: "Filesystem not writable",
 	},
 };
 

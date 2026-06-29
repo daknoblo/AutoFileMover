@@ -52,3 +52,12 @@ func TestDeleteAndRemoveIfEmpty(t *testing.T) {
 		t.Fatal("empty dir should be removed")
 	}
 }
+
+func TestCheckWritable(t *testing.T) {
+	if err := CheckWritable(t.TempDir()); err != nil {
+		t.Fatalf("writable dir reported error: %v", err)
+	}
+	if err := CheckWritable(filepath.Join(t.TempDir(), "does-not-exist")); err == nil {
+		t.Fatal("missing dir should report not writable")
+	}
+}

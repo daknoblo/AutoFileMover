@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/daknoblo/AutoFileMover/internal/config"
 	"github.com/daknoblo/AutoFileMover/internal/engine"
@@ -32,6 +34,12 @@ type Server struct {
 	resyncer Resyncer
 	logs     *logbuf.Buffer
 	level    *slog.LevelVar
+
+	// Cached filesystem-writability probe (refreshed at most every few seconds).
+	fsMu        sync.Mutex
+	fsCheckedAt time.Time
+	fsOK        bool
+	fsMsg       string
 }
 
 // NewServer creates the HTTP server.

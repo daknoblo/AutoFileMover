@@ -9,8 +9,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/daknoblo/AutoFileMover/internal/engine"
 	"github.com/daknoblo/AutoFileMover/internal/logbuf"
+	"github.com/daknoblo/AutoFileMover/internal/mover"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 	"github.com/daknoblo/AutoFileMover/internal/version"
 )
@@ -75,8 +78,39 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 
 // ---- Scan status ----
 
+// statusDTO combines scan progress with a filesystem-writability indicator.
+type statusDTO struct {
+	engine.Progress
+	FSWritable bool   `json:"fs_writable"`
+	FSMessage  string `json:"fs_message"`
+}
+
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.engine.GetProgress())
+	ok, msg := s.fsWritable()
+	writeJSON(w, http.StatusOK, statusDTO{
+		Progress:   s.engine.GetProgress(),
+		FSWritable: ok,
+		FSMessage:  msg,
+	})
+}
+
+// fsWritable probes whether the media root accepts create/move/delete, caching
+// the result for a few seconds so the frequently-polled status stays cheap.
+func (s *Server) fsWritable() (bool, string) {
+	s.fsMu.Lock()
+	defer s.fsMu.Unlock()
+	if !s.fsCheckedAt.IsZero() && time.Since(s.fsCheckedAt) < 10*time.Second {
+		return s.fsOK, s.fsMsg
+	}
+	err := mover.CheckWritable(s.cfg.MediaRoot)
+	s.fsCheckedAt = time.Now()
+	s.fsOK = err == nil
+	if err != nil {
+		s.fsMsg = err.Error()
+	} else {
+		s.fsMsg = ""
+	}
+	return s.fsOK, s.fsMsg
 }
 
 // ---- Settings ----

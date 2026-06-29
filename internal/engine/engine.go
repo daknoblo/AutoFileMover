@@ -31,10 +31,19 @@ type Engine struct {
 	prog   Progress
 }
 
+// Phase values for Progress.
+const (
+	PhaseIdle        = "idle"
+	PhaseScanning    = "scanning"
+	PhaseClassifying = "classifying"
+)
+
 // Progress describes the state of an in-flight scan for the UI status display.
 type Progress struct {
 	// Active is true while a scan is running.
 	Active bool `json:"active"`
+	// Phase is the current activity: idle, scanning or classifying.
+	Phase string `json:"phase"`
 	// Current is the name of the folder/file being processed right now.
 	Current string `json:"current"`
 	// Done is the number of candidates already processed.
@@ -58,17 +67,28 @@ func New(st *store.Store, cfg config.Config, log *slog.Logger) *Engine {
 func (e *Engine) GetProgress() Progress {
 	e.progMu.Lock()
 	defer e.progMu.Unlock()
+	if e.prog.Phase == "" {
+		e.prog.Phase = PhaseIdle
+	}
 	return e.prog
 }
 
-func (e *Engine) startProgress(total int) {
+// beginScan marks the start of a scan in the filesystem-reading phase.
+func (e *Engine) beginScan() {
 	e.progMu.Lock()
-	e.prog = Progress{Active: true, Total: total, startedAt: time.Now()}
+	e.prog = Progress{Active: true, Phase: PhaseScanning, startedAt: time.Now()}
+	e.progMu.Unlock()
+}
+
+func (e *Engine) setTotal(total int) {
+	e.progMu.Lock()
+	e.prog.Total = total
 	e.progMu.Unlock()
 }
 
 func (e *Engine) updateProgress(done int, current string) {
 	e.progMu.Lock()
+	e.prog.Phase = PhaseClassifying
 	e.prog.Done = done
 	e.prog.Current = current
 	if e.prog.Total > 0 {
@@ -85,6 +105,7 @@ func (e *Engine) updateProgress(done int, current string) {
 func (e *Engine) finishProgress() {
 	e.progMu.Lock()
 	e.prog.Active = false
+	e.prog.Phase = PhaseIdle
 	e.prog.Current = ""
 	e.prog.ETASeconds = 0
 	if e.prog.Total > 0 {
@@ -121,14 +142,15 @@ func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
 	if settings, err := e.store.LoadAppSettings(ctx); err == nil {
 		ignore = settings.IgnorePatterns
 	}
+	e.beginScan()
+	defer e.finishProgress()
 	candidates, err := scanner.ScanSource(sourcePath, ignore)
 	if err != nil {
 		e.log.Error("scan source", "path", sourcePath, "err", err)
 		return
 	}
 	e.log.Info("scanning source", "path", sourcePath, "candidates", len(candidates))
-	e.startProgress(len(candidates))
-	defer e.finishProgress()
+	e.setTotal(len(candidates))
 	for i, c := range candidates {
 		e.updateProgress(i, c.Name)
 		if !c.IsStable(e.cfg.StabilityWindow) {
@@ -150,8 +172,15 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 		switch existing.Status {
 		case store.StatusError:
 			// retry below
+		case store.StatusPendingReview:
+			// Re-classify in the background only if it was never classified yet
+			// (e.g. detected before the AI endpoint was configured). Already
+			// classified items keep the user's reviewed plan.
+			if existing.DetectedType != "" {
+				return nil
+			}
 		default:
-			return nil // already handled or waiting for review
+			return nil // already moved/confirmed/rejected
 		}
 	}
 
@@ -326,7 +355,8 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 		return err
 	}
 
-	e.startProgress(1)
+	e.beginScan()
+	e.setTotal(1)
 	defer e.finishProgress()
 	e.updateProgress(0, item.Name)
 
@@ -592,17 +622,35 @@ func (e *Engine) resolveTarget(res *ai.Result, libs []store.Library) (lib *store
 	if chosen == nil {
 		return nil, "", false, "no matching target library for AI suggestion"
 	}
-	if chosen.Kind == store.KindSeries {
-		if res.SeriesFolder == "" {
-			return chosen, "", false, "no existing series folder matched; manual review required"
+
+	// If the model picked a sub-folder, match it (case-insensitively) against the
+	// library's actual sub-folders so episodes land in the correct show folder.
+	if folder := strings.TrimSpace(res.SeriesFolder); folder != "" {
+		if match := matchSubfolder(chosen.Path, folder); match != "" {
+			return chosen, filepath.Join(chosen.Path, match), true, ""
 		}
-		dir := filepath.Join(chosen.Path, res.SeriesFolder)
-		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		if chosen.Kind == store.KindSeries {
 			return chosen, "", false, "suggested series folder does not exist; manual review required"
 		}
-		return chosen, dir, true, ""
+		// Movies/documentaries may still go to the library root.
+		return chosen, chosen.Path, true, ""
+	}
+
+	if chosen.Kind == store.KindSeries {
+		return chosen, "", false, "no existing series folder matched; manual review required"
 	}
 	return chosen, chosen.Path, true, ""
+}
+
+// matchSubfolder returns the actual sub-folder name of root that equals name
+// case-insensitively, or "" if none matches.
+func matchSubfolder(root, name string) string {
+	for _, sub := range listSubfolders(root) {
+		if strings.EqualFold(sub, name) {
+			return sub
+		}
+	}
+	return ""
 }
 
 // buildRequest constructs the AI classification request, including existing
@@ -621,13 +669,14 @@ func (e *Engine) buildRequest(ctx context.Context, name string, srcFiles []store
 	infos := make([]ai.LibraryInfo, 0, len(libs))
 	for _, l := range libs {
 		info := ai.LibraryInfo{Name: l.Name, Kind: l.Kind, Description: notes[l.Path]}
-		if l.Kind == store.KindSeries {
-			for _, name := range listSubfolders(l.Path) {
-				info.ExistingFolders = append(info.ExistingFolders, ai.ExistingFolder{
-					Name:        name,
-					Description: notes[filepath.Join(l.Path, name)],
-				})
-			}
+		// Include the existing sub-folder structure of every library so the model
+		// can map an item into the matching show/collection folder, not just the
+		// library root.
+		for _, name := range listSubfolders(l.Path) {
+			info.ExistingFolders = append(info.ExistingFolders, ai.ExistingFolder{
+				Name:        name,
+				Description: notes[filepath.Join(l.Path, name)],
+			})
 		}
 		infos = append(infos, info)
 	}
