@@ -59,6 +59,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
 		document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
 		tab.classList.add("active");
 		document.getElementById(tab.dataset.tab).classList.add("active");
+		if (tab.dataset.tab === "logs") loadLogs();
 	});
 });
 
@@ -342,6 +343,39 @@ document.getElementById("scanBtn").addEventListener("click", async () => {
 	}
 });
 
+// ---- Logs ----
+function fmtLog(line) {
+	try {
+		const o = JSON.parse(line);
+		const t = (o.time || "").replace("T", " ").slice(0, 19);
+		const lvl = (o.level || "").padEnd(5);
+		const rest = Object.entries(o).filter(([k]) => !["time", "level", "msg"].includes(k))
+			.map(([k, v]) => `${k}=${v}`).join(" ");
+		return `${t} ${lvl} ${o.msg || ""}${rest ? "  " + rest : ""}`;
+	} catch { return line; }
+}
+
+async function loadLogs() {
+	try {
+		const data = await api("GET", "/logs");
+		const out = document.getElementById("logOutput");
+		out.textContent = (data.lines || []).map(fmtLog).join("\n");
+		if (document.getElementById("logAutoScroll").checked) out.scrollTop = out.scrollHeight;
+	} catch (e) { /* ignore */ }
+}
+
+document.getElementById("logLevel").addEventListener("change", async (e) => {
+	try {
+		await api("PUT", "/log-level", { level: e.target.value });
+		toast("Log-Level: " + e.target.value.toUpperCase());
+		loadLogs();
+	} catch (err) { toast(err.message, true); }
+});
+document.getElementById("logClear").addEventListener("click", () => {
+	document.getElementById("logOutput").textContent = "";
+});
+setInterval(() => { if (document.getElementById("logs").classList.contains("active")) loadLogs(); }, 3000);
+
 async function refreshAll() {
 	await loadLibraries();
 	await loadItems();
@@ -425,6 +459,10 @@ async function init() {
 		await loadSources();
 		await loadLibraries();
 		await loadItems();
+		try {
+			const lvl = await api("GET", "/log-level");
+			document.getElementById("logLevel").value = lvl.level || "info";
+		} catch (_) { /* ignore */ }
 		try {
 			const root = await api("GET", "/browse");
 			document.getElementById("rootHint").textContent = root.path;

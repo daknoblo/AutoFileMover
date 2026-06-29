@@ -186,6 +186,25 @@ textarea {
 .toast.show { opacity: 1; }
 .toast.error { border-color: var(--red); }
 
+/* Logs */
+.logs-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.logs-controls { display: flex; align-items: center; gap: 12px; }
+.logs-controls label { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+.log-output {
+	background: #0b0d11;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 12px;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--text);
+	max-height: 70vh;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
 /* Header actions & what-if */
 .header-actions { display: flex; align-items: center; gap: 16px; }
 .whatif {

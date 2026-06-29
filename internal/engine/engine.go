@@ -39,9 +39,15 @@ func (e *Engine) ProcessAll(ctx context.Context) {
 		e.log.Error("list sources", "err", err)
 		return
 	}
+	if len(sources) == 0 {
+		e.log.Warn("scan: no source folder configured")
+		return
+	}
+	e.log.Info("scan started", "sources", len(sources))
 	for _, src := range sources {
 		e.ProcessSource(ctx, src.Path)
 	}
+	e.log.Info("scan finished")
 }
 
 // ProcessSource scans a single source folder and processes stable candidates.
@@ -58,9 +64,10 @@ func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
 		e.log.Error("scan source", "path", sourcePath, "err", err)
 		return
 	}
+	e.log.Info("scanning source", "path", sourcePath, "candidates", len(candidates))
 	for _, c := range candidates {
 		if !c.IsStable(e.cfg.StabilityWindow) {
-			e.log.Debug("candidate not yet stable, skipping", "path", c.Path)
+			e.log.Info("candidate not yet stable, skipping", "name", c.Name)
 			continue
 		}
 		if err := e.processCandidate(ctx, c, sourcePath); err != nil {
