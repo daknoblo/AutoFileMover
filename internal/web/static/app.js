@@ -105,30 +105,30 @@ function fileRows(item, interactive) {
 				? el("div", { class: "frow-target", text: "→ " + f.target_path })
 				: el("div", { class: "frow-target none", text: t("no_target") });
 		}
+		// Action toggles: neutral until selected; the selected action is coloured.
+		// Nothing runs here — execution happens on "Apply".
 		let acts = null;
 		if (interactive && !f.done) {
 			const btns = [];
 			if (!isEmpty) {
-				const mv = el("button", { class: "btn tiny", text: t("btn_move") });
-				mv.addEventListener("click", () => fileAction(item, f.rel_path, "move", name));
+				const mv = el("button", { class: "fbtn move" + (action === "move" ? " on" : ""), text: t("btn_move") });
+				mv.addEventListener("click", () => setFileAction(item, f.rel_path, "move"));
 				btns.push(mv);
 			}
-			const del = el("button", { class: "btn tiny danger", text: t("btn_delete") });
-			del.addEventListener("click", () => fileAction(item, f.rel_path, "delete", name));
+			const del = el("button", { class: "fbtn delete" + (action === "delete" ? " on" : ""), text: t("btn_delete") });
+			del.addEventListener("click", () => setFileAction(item, f.rel_path, "delete"));
 			btns.push(del);
 			acts = el("div", { class: "frow-acts" }, btns);
 		}
-		const top = el("div", { class: "frow-top" }, [meta, acts]);
-		box.appendChild(el("div", { class: "frow" }, [top, targetEl]));
+		box.appendChild(el("div", { class: "frow" }, [meta, targetEl, acts]));
 	});
 	return box;
 }
 
-async function fileAction(item, relPath, action, name) {
-	if (action === "delete" && !confirm(`„${name || relPath}“ ${t("confirm_delete")}`)) return;
+// setFileAction stores the planned action for a file (no filesystem change).
+async function setFileAction(item, relPath, action) {
 	try {
-		await api("POST", `/items/${item.id}/file-action`, { rel_path: relPath, action });
-		toast(action === "delete" ? t("deleted") : t("moved"));
+		await api("POST", `/items/${item.id}/file-plan`, { rel_path: relPath, action });
 		refreshAll();
 	} catch (e) { toast(e.message, true); }
 }

@@ -314,6 +314,45 @@ func (e *Engine) ApplyFileAction(ctx context.Context, id int64, relPath, action 
 	return e.store.UpsertItem(ctx, item)
 }
 
+// PlanFileAction sets the planned action for a single file WITHOUT touching the
+// filesystem. The review UI uses it for the per-file toggle buttons; execution
+// happens later via ApplyPlan ("Apply").
+func (e *Engine) PlanFileAction(ctx context.Context, id int64, relPath, action string) error {
+	switch action {
+	case store.FileActionMove, store.FileActionDelete, store.FileActionKeep:
+	default:
+		return fmt.Errorf("invalid action")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	item, err := e.store.GetItem(ctx, id)
+	if err != nil || item == nil {
+		return fmt.Errorf("item not found")
+	}
+	idx := -1
+	for i := range item.Files {
+		if item.Files[i].RelPath == relPath {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("file not found in item")
+	}
+	f := &item.Files[idx]
+	if f.Done {
+		return fmt.Errorf("file already processed")
+	}
+	f.Action = action
+	if action == store.FileActionMove && relPath != "" && item.TargetPath != "" {
+		f.TargetPath = filepath.Join(item.TargetPath, filepath.Base(relPath))
+	} else {
+		f.TargetPath = ""
+	}
+	return e.store.UpsertItem(ctx, item)
+}
+
 // executePlan runs every undecided move/delete file then cleans up.
 func (e *Engine) executePlan(item *store.Item) error {
 	for i := range item.Files {
