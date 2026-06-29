@@ -92,12 +92,10 @@ main { padding: 24px; }
 .panel { display: none; max-width: 980px; }
 .panel.active { display: block; }
 
-/* Review uses the available width: each detected folder spans ~75% of screen,
-   anchored to the left. */
+/* Review uses the available width: each detected folder is wide enough that
+   file names never wrap (left-anchored, capped so it stays sane on wide screens). */
 #review.panel { max-width: none; }
-#review h2, #review .hint, #review .cards {
-	width: 75vw; max-width: 75vw;
-}
+#review h2, #review .hint, #review .cards { width: min(92vw, 1500px); max-width: 95vw; }
 
 h2 { margin-top: 0; }
 .hint { color: var(--muted); margin-top: -8px; font-size: 14px; }
@@ -173,7 +171,7 @@ textarea {
 	padding: 16px;
 }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.card-title { font-weight: 600; word-break: break-word; }
+.card-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
 .card-sub { color: var(--muted); font-size: 13px; margin: 4px 0; }
 .files { color: var(--muted); font-size: 12px; max-height: 120px; overflow: auto; margin: 8px 0; }
 .files div { padding: 1px 0; }
@@ -191,9 +189,9 @@ textarea {
 	word-break: break-all; padding-left: 2px;
 }
 .frow-target.none { color: var(--yellow); font-family: inherit; }
-.frow-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.fname { color: var(--text); font-size: 13px; word-break: break-all; }
-.fsize { color: var(--muted); font-size: 12px; }
+.frow-meta { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
+.fname { color: var(--text); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fsize { color: var(--muted); font-size: 12px; white-space: nowrap; flex: 0 0 auto; }
 .fdone { color: var(--green); font-size: 12px; }
 /* Action toggle buttons: neutral until selected, then coloured. Right-aligned,
    vertically centred. */
@@ -204,14 +202,15 @@ textarea {
 	transition: background .15s, color .15s, border-color .15s;
 }
 .fbtn:hover { color: var(--text); border-color: var(--muted); }
-.fbtn.move.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.fbtn.review.on { background: var(--yellow); border-color: var(--yellow); color: #1a1d23; }
+.fbtn.move.on { background: var(--green); border-color: var(--green); color: #06231a; }
 .fbtn.delete.on { background: var(--red); border-color: var(--red); color: #fff; }
 .btn.tiny { padding: 3px 8px; font-size: 12px; }
 .ftag { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
 .ftag.move { background: rgba(79,140,255,.18); color: var(--accent); }
 .ftag.delete { background: rgba(248,81,73,.15); color: var(--red); }
 .ftag.keep { background: rgba(210,153,34,.15); color: var(--yellow); }
-.fprob { font-size: 11px; padding: 2px 6px; border-radius: 10px; font-variant-numeric: tabular-nums; }
+.fprob { font-size: 11px; padding: 2px 6px; border-radius: 10px; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
 .fprob.high { color: var(--green); } .fprob.mid { color: var(--yellow); } .fprob.low { color: var(--red); }
 .card-sub.err { color: var(--red); }
 
@@ -221,6 +220,7 @@ textarea {
 	padding: 2px 8px;
 	border-radius: 12px;
 	font-size: 13px;
+	flex: 0 0 auto;
 }
 .prob.high { background: rgba(63,185,80,.15); color: var(--green); }
 .prob.mid { background: rgba(210,153,34,.15); color: var(--yellow); }

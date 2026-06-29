@@ -94,32 +94,34 @@ function fileRows(item, interactive) {
 	(item.files || []).slice(0, 100).forEach((f) => {
 		const action = f.action || "keep";
 		const isEmpty = !f.rel_path;
-		const name = isEmpty ? t("empty_folder") : f.rel_path;
-		const label = el("span", { class: "ftag " + action, text: actionLabel(action) });
+		// Show only the file name, not the repeated folder path.
+		const name = isEmpty ? t("empty_folder") : f.rel_path.split("/").pop();
 		const pct = f.probability ? Math.round(f.probability * 100) + "%" : "";
 		const prob = pct ? el("span", { class: "fprob " + probClass(f.probability), text: pct }) : null;
 		const meta = el("div", { class: "frow-meta" }, [
-			el("span", { class: "fname", text: name }),
+			el("span", { class: "fname", text: name, title: name }),
 			(!isEmpty && f.size) ? el("span", { class: "fsize", text: fmtSize(f.size) }) : null,
-			label, prob,
+			prob,
 			f.done ? el("span", { class: "fdone", text: t("done") }) : null,
 		]);
-		// Suggested target shown per file (replaces the per-folder dropdown).
+		// When the file will move, show its destination under the file name.
 		let targetEl = null;
 		if (action === "move") {
 			targetEl = f.target_path
 				? el("div", { class: "frow-target", text: "→ " + f.target_path })
 				: el("div", { class: "frow-target none", text: t("no_target") });
 		}
-		// Action toggles: neutral until selected; the selected action is coloured.
-		// Nothing runs here — execution happens on "Apply".
+		// Action toggles coloured by the AI decision: green=move, red=delete,
+		// yellow=review (unsure). Nothing runs here — execution is on "Apply".
 		let acts = null;
 		if (interactive && !f.done) {
 			const btns = [];
 			if (!isEmpty) {
+				const rev = el("button", { class: "fbtn review" + (action === "keep" ? " on" : ""), text: t("btn_review") });
+				rev.addEventListener("click", () => setFileAction(item, f.rel_path, "keep"));
 				const mv = el("button", { class: "fbtn move" + (action === "move" ? " on" : ""), text: t("btn_move") });
 				mv.addEventListener("click", () => setFileAction(item, f.rel_path, "move"));
-				btns.push(mv);
+				btns.push(rev, mv);
 			}
 			const del = el("button", { class: "fbtn delete" + (action === "delete" ? " on" : ""), text: t("btn_delete") });
 			del.addEventListener("click", () => setFileAction(item, f.rel_path, "delete"));
@@ -143,7 +145,7 @@ async function setFileAction(item, relPath, action) {
 function reviewCard(item) {
 	const prob = el("span", { class: "prob " + probClass(item.probability), text: Math.round(item.probability * 100) + "%" });
 	const head = el("div", { class: "card-head" }, [
-		el("div", { class: "card-title", text: item.name }),
+		el("div", { class: "card-title", text: item.name, title: item.name }),
 		prob,
 	]);
 	const errBox = item.error_message ? el("div", { class: "card-sub err", text: t("error") + ": " + item.error_message }) : null;
@@ -205,7 +207,7 @@ function reviewCard(item) {
 function historyCard(item) {
 	const prob = el("span", { class: "prob " + probClass(item.probability), text: Math.round(item.probability * 100) + "%" });
 	const head = el("div", { class: "card-head" }, [
-		el("div", { class: "card-title", text: item.name }),
+		el("div", { class: "card-title", text: item.name, title: item.name }),
 		el("span", { class: "status", text: statusLabel(item.status) }),
 	]);
 	const target = item.target_path ? el("div", { class: "card-sub", text: "→ " + item.target_path }) : null;
