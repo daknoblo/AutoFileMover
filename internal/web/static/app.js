@@ -436,13 +436,21 @@ async function loadLogs() {
 	} catch (e) { /* ignore */ }
 }
 
-document.getElementById("logLevel").addEventListener("change", async (e) => {
+// Change the log level from either the Logs tab or the Settings page, keeping
+// both dropdowns in sync.
+async function setLogLevel(level) {
 	try {
-		await api("PUT", "/log-level", { level: e.target.value });
-		toast("Log-Level: " + e.target.value.toUpperCase());
-		loadLogs();
+		await api("PUT", "/log-level", { level });
+		const ls = document.getElementById("logLevel");
+		const ss = document.getElementById("logLevelSettings");
+		if (ls) ls.value = level;
+		if (ss) ss.value = level;
+		toast(t("log_level_set") + " " + level.toUpperCase());
+		if (document.getElementById("logs").classList.contains("active")) loadLogs();
 	} catch (err) { toast(err.message, true); }
-});
+}
+document.getElementById("logLevel").addEventListener("change", (e) => setLogLevel(e.target.value));
+document.getElementById("logLevelSettings").addEventListener("change", (e) => setLogLevel(e.target.value));
 document.getElementById("logClear").addEventListener("click", () => {
 	document.getElementById("logOutput").textContent = "";
 });
@@ -593,7 +601,9 @@ async function init() {
 		await loadItems();
 		try {
 			const lvl = await api("GET", "/log-level");
-			document.getElementById("logLevel").value = lvl.level || "info";
+			const level = lvl.level || "info";
+			document.getElementById("logLevel").value = level;
+			document.getElementById("logLevelSettings").value = level;
 		} catch (_) { /* ignore */ }
 		try {
 			const root = await api("GET", "/browse");
