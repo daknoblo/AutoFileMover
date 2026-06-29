@@ -420,6 +420,21 @@ func (s *Server) handleReclassifyItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reclassified"})
 }
 
+// handleCreateItemFolder creates the AI-suggested destination folder for an item
+// and sets it as the move target.
+func (s *Server) handleCreateItemFolder(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.engine.CreateTargetFolder(r.Context(), id); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "created"})
+}
+
 func (s *Server) handleRejectItem(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {

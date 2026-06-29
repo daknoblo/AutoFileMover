@@ -158,6 +158,20 @@ function reviewCard(item) {
 
 	// Fallback target picker — only when a file wants to move but has no target.
 	if (needsTarget) {
+		const actions = [];
+
+		// One-click create of the AI-suggested folder when it doesn't exist yet.
+		if (item.suggested_folder && item.suggested_library_id) {
+			const sLib = libraries.find((l) => l.id === item.suggested_library_id);
+			const createBtn = el("button", { class: "btn small", text: t("create_folder") + ": " + item.suggested_folder });
+			if (sLib) createBtn.title = sLib.path + "/" + item.suggested_folder;
+			createBtn.addEventListener("click", async () => {
+				try { await api("POST", `/items/${item.id}/create-folder`); toast(t("folder_created")); refreshAll(); }
+				catch (e) { toast(e.message, true); }
+			});
+			actions.push(createBtn);
+		}
+
 		const libSelect = el("select");
 		libSelect.appendChild(el("option", { value: "", text: t("choose_lib") }));
 		libraries.forEach((l) => libSelect.appendChild(el("option", { value: String(l.id), text: `${l.name} (${l.kind})` })));
@@ -171,7 +185,7 @@ function reviewCard(item) {
 				folders.forEach((f) => subSelect.appendChild(el("option", { value: f, text: f })));
 			}
 		});
-		const setBtn = el("button", { class: "btn small", text: t("set_target") });
+		const setBtn = el("button", { class: "btn small secondary", text: t("set_target") });
 		setBtn.addEventListener("click", async () => {
 			const libId = parseInt(libSelect.value, 10);
 			if (!libId) return toast(t("need_lib"), true);
@@ -180,7 +194,8 @@ function reviewCard(item) {
 				toast(t("target_set")); refreshAll();
 			} catch (e) { toast(e.message, true); }
 		});
-		children.push(el("div", { class: "card-actions" }, [libSelect, subSelect, setBtn]));
+		actions.push(libSelect, subSelect, setBtn);
+		children.push(el("div", { class: "card-actions" }, actions));
 	}
 
 	const reBtn = el("button", { class: "btn small secondary", text: t("reanalyze") });
