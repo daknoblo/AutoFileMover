@@ -40,7 +40,7 @@
 
 		<section id="settings" class="panel active-settings">
 			<h2>Quellordner</h2>
-			<p class="hint">Ordner unterhalb von <code id="rootHint">/dataroot</code>, die auf neue Downloads überwacht werden.</p>
+			<p class="hint">Der eine Quellordner unterhalb von <code id="rootHint">/dataroot</code>, der auf neue Downloads überwacht wird.</p>
 			<button id="addSourceBtn" class="btn" type="button">＋ Quellordner wählen</button>
 			<ul id="sourceList" class="list"></ul>
 
@@ -69,7 +69,9 @@
 				<label class="checkbox">
 					<input type="checkbox" id="autoMove" checked /> Automatisches Verschieben aktiv
 				</label>
-				<button type="submit" class="btn">Speichern</button>
+				<label>Ignorierte Ordner/Dateien <small>(eine pro Zeile; Teiltext oder Glob, z. B. _UNPACK, sample, *.txt)</small>
+					<textarea id="ignorePatterns" rows="4" placeholder="_UNPACK&#10;sample"></textarea>
+				</label>
 			</form>
 		</section>
 	</main>
@@ -94,7 +96,7 @@
 					</select>
 				</label>
 			</div>
-			<label class="picker-desc">Beschreibung (KI-Kontext, optional)
+			<label class="picker-desc" id="pickerDescLabel">Beschreibung (KI-Kontext, optional)
 				<input type="text" id="pickerDesc" placeholder="z. B. Alle deutschen Dokumentationen" />
 			</label>
 			<div class="modal-actions">

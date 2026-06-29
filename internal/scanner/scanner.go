@@ -25,8 +25,10 @@ type Candidate struct {
 	LastModified time.Time
 }
 
-// ScanSource returns the candidate items directly inside sourcePath.
-func ScanSource(sourcePath string) ([]Candidate, error) {
+// ScanSource returns the candidate items directly inside sourcePath. Entries
+// whose name matches an ignore pattern are skipped, and files matching a
+// pattern are excluded from each candidate's file list.
+func ScanSource(sourcePath string, ignore []string) ([]Candidate, error) {
 	entries, err := os.ReadDir(sourcePath)
 	if err != nil {
 		return nil, err
@@ -37,8 +39,11 @@ func ScanSource(sourcePath string) ([]Candidate, error) {
 		if strings.HasPrefix(name, ".") {
 			continue // skip hidden/partial files
 		}
+		if matchesAny(name, ignore) {
+			continue // skip ignored folders/files (e.g. _UNPACK, sample)
+		}
 		full := filepath.Join(sourcePath, name)
-		c, err := inspect(full, e.IsDir())
+		c, err := inspect(full, e.IsDir(), ignore)
 		if err != nil {
 			continue // unreadable entry; skip
 		}
@@ -47,7 +52,29 @@ func ScanSource(sourcePath string) ([]Candidate, error) {
 	return out, nil
 }
 
-func inspect(path string, isDir bool) (Candidate, error) {
+// matchesAny reports whether name matches any ignore pattern. A pattern with
+// glob characters is matched with filepath.Match against the base name;
+// otherwise a case-insensitive substring match is used.
+func matchesAny(name string, ignore []string) bool {
+	lower := strings.ToLower(name)
+	for _, p := range ignore {
+		if p == "" {
+			continue
+		}
+		if strings.ContainsAny(p, "*?[") {
+			if ok, _ := filepath.Match(strings.ToLower(p), lower); ok {
+				return true
+			}
+			continue
+		}
+		if strings.Contains(lower, strings.ToLower(p)) {
+			return true
+		}
+	}
+	return false
+}
+
+func inspect(path string, isDir bool, ignore []string) (Candidate, error) {
 	c := Candidate{Name: filepath.Base(path), Path: path, IsDir: isDir}
 	if !isDir {
 		info, err := os.Stat(path)
@@ -74,6 +101,9 @@ func inspect(path string, isDir bool) (Candidate, error) {
 		info, err := d.Info()
 		if err != nil {
 			return nil
+		}
+		if matchesAny(info.Name(), ignore) {
+			return nil // skip ignored files (e.g. sample)
 		}
 		rel, _ := filepath.Rel(path, p)
 		c.Files = append(c.Files, store.File{

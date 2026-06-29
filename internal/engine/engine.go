@@ -49,7 +49,11 @@ func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	candidates, err := scanner.ScanSource(sourcePath)
+	var ignore []string
+	if settings, err := e.store.LoadAppSettings(ctx); err == nil {
+		ignore = settings.IgnorePatterns
+	}
+	candidates, err := scanner.ScanSource(sourcePath, ignore)
 	if err != nil {
 		e.log.Error("scan source", "path", sourcePath, "err", err)
 		return

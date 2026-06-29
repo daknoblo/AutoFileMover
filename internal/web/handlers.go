@@ -27,6 +27,18 @@ func pathID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(r.PathValue("id"), 10, 64)
 }
 
+// splitLines parses a newline/comma separated list, trimming blanks.
+func splitLines(s string) []string {
+	repl := strings.ReplaceAll(s, ",", "\n")
+	out := []string{}
+	for _, line := range strings.Split(repl, "\n") {
+		if p := strings.TrimSpace(line); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // validatePath ensures p is an absolute, existing directory inside the media root.
 func (s *Server) validatePath(p string) error {
 	if p == "" || !filepath.IsAbs(p) {
@@ -64,6 +76,7 @@ type settingsDTO struct {
 	Threshold    float64 `json:"threshold"`
 	AutoMove     bool    `json:"auto_move"`
 	DryRun       bool    `json:"dry_run"`
+	Ignore       string  `json:"ignore_patterns"`
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +93,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		Threshold:    a.Threshold,
 		AutoMove:     a.AutoMove,
 		DryRun:       a.DryRun,
+		Ignore:       strings.Join(a.IgnorePatterns, "\n"),
 	})
 }
 
@@ -100,6 +114,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		AIAPIKey:     dto.AIAPIKey, // empty -> keep existing
 		Threshold:    dto.Threshold,
 		AutoMove:     dto.AutoMove,
+		IgnorePatterns: splitLines(dto.Ignore),
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

@@ -212,7 +212,6 @@ function descRow(path) {
 }
 
 async function loadSources() {
-	await loadFolderNotes();
 	const sources = await api("GET", "/sources");
 	const list = document.getElementById("sourceList");
 	list.innerHTML = "";
@@ -226,11 +225,9 @@ async function loadSources() {
 				toast(e.message, true);
 			}
 		});
-		list.appendChild(el("li", { class: "folder-item" }, [
-			el("div", { class: "folder-head" }, [el("span", { text: s.path }), del]),
-			descRow(s.path),
-		]));
+		list.appendChild(el("li", {}, [el("span", { text: s.path }), del]));
 	});
+	document.getElementById("addSourceBtn").textContent = (sources && sources.length) ? "Quellordner ändern" : "＋ Quellordner wählen";
 }
 
 document.getElementById("addSourceBtn").addEventListener("click", () => openPicker("source"));
@@ -273,6 +270,7 @@ async function loadSettings() {
 	document.getElementById("threshold").value = Math.round((s.threshold ?? 0.9) * 100);
 	document.getElementById("thresholdValue").textContent = Math.round((s.threshold ?? 0.9) * 100) + "%";
 	document.getElementById("autoMove").checked = !!s.auto_move;
+	document.getElementById("ignorePatterns").value = (s.ignore_patterns || "");
 	document.getElementById("keyHint").textContent = s.has_api_key ? "(gespeichert – leer lassen zum Beibehalten)" : "(noch nicht gesetzt)";
 	applyDryRun(!!s.dry_run);
 }
@@ -298,26 +296,40 @@ document.getElementById("threshold").addEventListener("input", (e) => {
 	document.getElementById("thresholdValue").textContent = e.target.value + "%";
 });
 
-document.getElementById("settingsForm").addEventListener("submit", async (e) => {
-	e.preventDefault();
+async function saveSettings() {
 	const body = {
 		ai_base_url: document.getElementById("aiBaseUrl").value.trim(),
 		ai_model: document.getElementById("aiModel").value.trim(),
 		ai_api_version: document.getElementById("aiApiVersion").value.trim(),
 		threshold: parseInt(document.getElementById("threshold").value, 10) / 100,
 		auto_move: document.getElementById("autoMove").checked,
+		ignore_patterns: document.getElementById("ignorePatterns").value,
 	};
 	const key = document.getElementById("aiApiKey").value;
 	if (key) body.ai_api_key = key;
 	try {
 		await api("PUT", "/settings", body);
-		document.getElementById("aiApiKey").value = "";
-		await loadSettings();
-		toast("Einstellungen gespeichert");
+		if (key) {
+			document.getElementById("aiApiKey").value = "";
+			document.getElementById("keyHint").textContent = "(gespeichert – leer lassen zum Beibehalten)";
+		}
+		toast("Gespeichert");
 	} catch (err) {
 		toast(err.message, true);
 	}
-});
+}
+
+let saveTimer;
+function autoSave() {
+	clearTimeout(saveTimer);
+	saveTimer = setTimeout(saveSettings, 600);
+}
+
+["aiBaseUrl", "aiModel", "aiApiVersion", "ignorePatterns"].forEach((id) =>
+	document.getElementById(id).addEventListener("input", autoSave));
+document.getElementById("aiApiKey").addEventListener("change", saveSettings);
+document.getElementById("autoMove").addEventListener("change", saveSettings);
+document.getElementById("threshold").addEventListener("change", saveSettings);
 
 // ---- Scan ----
 document.getElementById("scanBtn").addEventListener("click", async () => {
@@ -345,6 +357,7 @@ async function openPicker(mode) {
 	document.getElementById("pickerTitle").textContent =
 		mode === "library" ? "Bibliothek anlegen" : "Quellordner wählen";
 	document.getElementById("libFields").hidden = mode !== "library";
+	document.getElementById("pickerDescLabel").hidden = mode !== "library";
 	document.getElementById("pickerDesc").value = "";
 	document.getElementById("libName").value = "";
 	document.getElementById("libKind").value = "movie";
@@ -364,10 +377,9 @@ async function pickerLoad(path) {
 	document.getElementById("pickerPath").textContent = data.path;
 	document.getElementById("pickerSelectedPath").textContent = data.path;
 	document.getElementById("pickerUp").disabled = data.at_root;
-	if (data.entries.length && pickerMode === "library") {
-		const suggested = data.entries[0].name;
-		const nameField = document.getElementById("libName");
-		if (!nameField.value) nameField.value = suggested;
+	if (pickerMode === "library") {
+		const base = data.path.split("/").filter(Boolean).pop() || "";
+		document.getElementById("libName").value = base;
 	}
 	const list = document.getElementById("pickerList");
 	list.innerHTML = "";
@@ -387,10 +399,11 @@ document.getElementById("pickerConfirm").addEventListener("click", async () => {
 	const desc = document.getElementById("pickerDesc").value.trim();
 	try {
 		if (pickerMode === "source") {
+			const existing = (await api("GET", "/sources")) || [];
+			for (const s of existing) await api("DELETE", `/sources/${s.id}`);
 			await api("POST", "/sources", { path });
-			if (desc) await api("PUT", "/folder-notes", { path, description: desc });
 			await loadSources();
-			toast("Quellordner hinzugefügt");
+			toast("Quellordner gesetzt");
 		} else {
 			const name = document.getElementById("libName").value.trim();
 			const kind = document.getElementById("libKind").value;
