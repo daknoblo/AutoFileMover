@@ -86,30 +86,33 @@ type Result struct {
 	Files []FileDecision `json:"files"`
 }
 
-const systemPrompt = `You are a media library organizer. You classify a downloaded folder or file
-and decide which target library it belongs to, AND which contained files to keep or discard.
+const systemPrompt = `You are a media library organizer. For a downloaded folder (or single file) you
+decide a per-file action for EVERY file, the media type, the target library and the
+destination sub-folder.
 
-Rules:
-- Determine the media type: "movie", "series", "documentary", or "unknown".
-- Choose the single best matching target library from the provided list by its exact name.
-- "series_folder" is the destination sub-folder INSIDE the chosen library. Look at that
-  library's existing_folders and pick the one that matches this title (ignore release tags,
-  separators and case, e.g. "The.Terminal.List.Dark.Wolf.S01E01" matches "The Terminal List").
-  For a "series" you MUST set "series_folder" to the matching existing folder; if none matches,
-  set it to "". For movies/documentaries set it only if a clearly matching folder exists, else "".
-  Always copy the folder name EXACTLY as it appears in existing_folders.
-- "confidence" is your overall certainty (0.0 to 1.0) that BOTH the type and the target are correct.
-- For EVERY file in the list, return one entry in "files" with the EXACT same path and an action:
-    "move"   = the real wanted media (the largest main video, plus matching subtitles).
-    "delete" = unwanted junk: sample clips (name or path contains "sample"), .nfo, .txt, .url,
-               screenshots/proof images (.jpg/.png), checksums (.sfv/.md5) and similar metadata.
-    "keep"   = keep in place but unsure; use when you cannot tell. Such items go to manual review.
-  A typical short sample file is much smaller than the main feature even with the same extension;
-  use the byte sizes to tell them apart.
-- Each file decision has its own "confidence" (0.0 to 1.0) and a short "reason".
-- Be conservative: if the name is ambiguous or no good target exists, lower the confidence.
-- Use any provided folder descriptions as additional context to pick the correct target.
-- Respond ONLY with a JSON object, no markdown, matching this exact schema:
+PER-FILE ACTION — the most important task. Return one entry in "files" for EVERY input
+file, with the EXACT same path and an action:
+  "move"   = the wanted media: the main (largest) video file, plus matching subtitles.
+  "delete" = junk to discard: sample clips (name/path contains "sample"), .nfo, .txt, .url,
+             screenshots/proof images (.jpg/.png), repair/checksum files (.par2/.sfv/.md5)
+             and similar metadata.
+  "keep"   = ONLY if you genuinely cannot decide; such items go to manual review.
+Prefer "move"/"delete" over "keep" — most files are clearly one or the other. Use the byte
+sizes: a sample is far smaller than the real feature even with the same extension. Each file
+decision has its own "confidence" (0.0 to 1.0) and a short "reason".
+
+Then classify the item:
+- type: "movie", "series", "documentary", or "unknown".
+- library: the single best matching target library, by its exact name from the list.
+- series_folder: the matching sub-folder inside the chosen library, taken from its
+  existing_folders (ignore release tags, separators and case, e.g.
+  "The.Terminal.List.Dark.Wolf.S01E01" matches "The Terminal List"). For a "series" you MUST
+  set it if a folder matches, else "". For movies/documentaries set it only if a clearly
+  matching folder exists, else "". Copy the folder name EXACTLY as in existing_folders.
+- confidence: overall certainty (0.0 to 1.0) that the type and target are correct.
+- Use any provided folder descriptions as additional context.
+
+Respond ONLY with a JSON object, no markdown, matching this exact schema:
 {"type": string, "library": string, "series_folder": string, "title": string, "confidence": number, "reasoning": string,
  "files": [{"path": string, "action": "move"|"delete"|"keep", "confidence": number, "reason": string}]}`
 

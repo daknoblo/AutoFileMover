@@ -178,6 +178,7 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 		APIKey:     settings.AIAPIKey,
 		Model:      settings.AIModel,
 		APIVersion: settings.AIAPIVersion,
+		Logger:     e.log,
 	})
 	aiConfigured := client.Configured()
 
@@ -245,6 +246,11 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 	item.Reasoning = res.Reasoning
 	item.AIRaw = fmt.Sprintf("type=%s library=%s series_folder=%s title=%s confidence=%.3f",
 		res.Type, res.Library, res.SeriesFolder, res.Title, res.Confidence)
+
+	mv, del, keep := countActions(res.Files)
+	e.log.Info("classified item", "name", c.Name, "type", res.Type, "library", res.Library,
+		"series_folder", res.SeriesFolder, "confidence", res.Confidence,
+		"files", len(res.Files), "move", mv, "delete", del, "keep", keep)
 
 	lib, destDir, ok, reason := e.resolveTarget(res, libs)
 	if ok && lib != nil {
@@ -355,6 +361,7 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 		APIKey:     settings.AIAPIKey,
 		Model:      settings.AIModel,
 		APIVersion: settings.AIAPIVersion,
+		Logger:     e.log,
 	})
 	if !client.Configured() {
 		return fmt.Errorf("KI-Endpoint nicht konfiguriert")
@@ -396,8 +403,26 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 	applyDecisions(item.Files, res.Files, destDir)
 	item.Status = store.StatusPendingReview
 	item.ErrorMessage = ""
-	e.log.Info("reclassified item", "name", item.Name, "confidence", res.Confidence)
+	mv, del, keep := countActions(res.Files)
+	e.log.Info("reclassified item", "name", item.Name, "type", res.Type, "library", res.Library,
+		"series_folder", res.SeriesFolder, "confidence", res.Confidence,
+		"files", len(res.Files), "move", mv, "delete", del, "keep", keep)
 	return e.store.UpsertItem(ctx, item)
+}
+
+// countActions tallies the AI per-file decisions by action for logging.
+func countActions(files []ai.FileDecision) (move, del, keep int) {
+	for _, f := range files {
+		switch f.Action {
+		case ai.ActionMove:
+			move++
+		case ai.ActionDelete:
+			del++
+		default:
+			keep++
+		}
+	}
+	return
 }
 
 // ApplyFileAction performs a single planned action (move or delete) for one file
@@ -543,14 +568,25 @@ func pendingWork(files []store.File) bool {
 }
 
 // applyDecisions maps the AI per-file decisions onto the item files and resolves
-// a destination path for every file that should move into destDir.
+// a destination path for every file that should move into destDir. Matching is
+// tolerant: it first tries the exact relative path, then falls back to the base
+// file name, so a model that returns a slightly different path still maps.
 func applyDecisions(files []store.File, decisions []ai.FileDecision, destDir string) {
 	byPath := make(map[string]ai.FileDecision, len(decisions))
+	byBase := make(map[string]ai.FileDecision, len(decisions))
 	for _, d := range decisions {
-		byPath[d.Path] = d
+		p := strings.TrimSpace(d.Path)
+		byPath[p] = d
+		base := filepath.Base(filepath.FromSlash(p))
+		if _, exists := byBase[base]; !exists {
+			byBase[base] = d
+		}
 	}
 	for i := range files {
 		d, ok := byPath[files[i].RelPath]
+		if !ok {
+			d, ok = byBase[filepath.Base(files[i].RelPath)]
+		}
 		if !ok {
 			files[i].Action = store.FileActionKeep
 			continue
