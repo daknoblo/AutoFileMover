@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"strconv"
+	"strings"
 )
 
 // Setting keys.
@@ -14,7 +15,11 @@ const (
 	KeyThreshold    = "threshold"
 	KeyAutoMove     = "auto_move"
 	KeyDryRun       = "dry_run"
+	KeyIgnore       = "ignore_patterns"
 )
+
+// DefaultIgnorePatterns are applied when the user has not configured any.
+var DefaultIgnorePatterns = []string{"_UNPACK", "sample"}
 
 // AppSettings is the typed view of the user-configurable settings.
 type AppSettings struct {
@@ -26,6 +31,9 @@ type AppSettings struct {
 	AutoMove     bool    `json:"auto_move"`
 	// DryRun is the "what-if" mode: when true no files are moved.
 	DryRun bool `json:"dry_run"`
+	// IgnorePatterns are case-insensitive substrings or globs; matching folders
+	// and files are skipped during scanning.
+	IgnorePatterns []string `json:"ignore_patterns"`
 }
 
 // LoadAppSettings reads the typed application settings, applying defaults.
@@ -48,6 +56,10 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 	if v, ok := all[KeyDryRun]; ok {
 		dryRun = v == "true" || v == "1"
 	}
+	ignore := DefaultIgnorePatterns
+	if v, ok := all[KeyIgnore]; ok {
+		ignore = splitPatterns(v)
+	}
 	return AppSettings{
 		AIBaseURL:    all[KeyAIBaseURL],
 		AIAPIKey:     all[KeyAIAPIKey],
@@ -56,7 +68,20 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 		Threshold:    threshold,
 		AutoMove:     autoMove,
 		DryRun:       dryRun,
+		IgnorePatterns: ignore,
 	}, nil
+}
+
+// splitPatterns parses a newline/comma separated list, trimming blanks.
+func splitPatterns(s string) []string {
+	repl := strings.ReplaceAll(s, ",", "\n")
+	var out []string
+	for _, line := range strings.Split(repl, "\n") {
+		if p := strings.TrimSpace(line); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // SetDryRun toggles the what-if mode independently of the other settings.
@@ -74,6 +99,7 @@ func (s *Store) SaveAppSettings(ctx context.Context, a AppSettings) error {
 		KeyAIAPIVersion: a.AIAPIVersion,
 		KeyThreshold:    strconv.FormatFloat(a.Threshold, 'f', -1, 64),
 		KeyAutoMove:     strconv.FormatBool(a.AutoMove),
+		KeyIgnore:       strings.Join(a.IgnorePatterns, "\n"),
 	}
 	for k, v := range pairs {
 		if err := s.SetSetting(ctx, k, v); err != nil {
