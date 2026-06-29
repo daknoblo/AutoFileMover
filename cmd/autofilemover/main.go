@@ -16,6 +16,7 @@ import (
 
 	"github.com/daknoblo/AutoFileMover/internal/config"
 	"github.com/daknoblo/AutoFileMover/internal/engine"
+	"github.com/daknoblo/AutoFileMover/internal/logbuf"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 	"github.com/daknoblo/AutoFileMover/internal/watcher"
 	"github.com/daknoblo/AutoFileMover/internal/web"
@@ -23,7 +24,10 @@ import (
 
 func main() {
 	cfg := config.Load()
-	log := newLogger()
+	levelVar := new(slog.LevelVar)
+	levelVar.Set(logbuf.ParseLevel(os.Getenv("AFM_LOG_LEVEL")))
+	logs := logbuf.New(1000, os.Stdout)
+	log := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: levelVar}))
 
 	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
 		log.Error("create data dir", "err", err)
@@ -37,9 +41,14 @@ func main() {
 	}
 	defer st.Close()
 
+	// Apply persisted log level if set.
+	if lvl, e := st.GetSetting(context.Background(), "log_level", ""); e == nil && lvl != "" {
+		levelVar.Set(logbuf.ParseLevel(lvl))
+	}
+
 	eng := engine.New(st, cfg, log)
 	w := watcher.New(st, eng, log, 3*time.Second)
-	srv := web.NewServer(st, eng, cfg, log, w)
+	srv := web.NewServer(st, eng, cfg, log, w, logs, levelVar)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -73,17 +82,4 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Error("http shutdown", "err", err)
 	}
-}
-
-func newLogger() *slog.Logger {
-	level := slog.LevelInfo
-	switch os.Getenv("AFM_LOG_LEVEL") {
-	case "debug", "DEBUG":
-		level = slog.LevelDebug
-	case "warn", "WARN":
-		level = slog.LevelWarn
-	case "error", "ERROR":
-		level = slog.LevelError
-	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 }

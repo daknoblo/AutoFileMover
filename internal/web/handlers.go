@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/daknoblo/AutoFileMover/internal/logbuf"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 )
 
@@ -323,8 +324,38 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 // ---- Scan ----
 
 func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
+	s.log.Info("manual scan requested")
 	go s.engine.ProcessAll(context.Background())
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "scan started"})
+}
+
+// ---- Logs & level ----
+
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	lines := []string{}
+	if s.logs != nil {
+		lines = s.logs.Lines()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"lines": lines})
+}
+
+func (s *Server) handleGetLogLevel(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"level": logbuf.LevelName(s.level.Level())})
+}
+
+func (s *Server) handleSetLogLevel(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Level string `json:"level"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	lvl := logbuf.ParseLevel(body.Level)
+	s.level.Set(lvl)
+	_ = s.store.SetSetting(r.Context(), "log_level", logbuf.LevelName(lvl))
+	s.log.Info("log level changed", "level", logbuf.LevelName(lvl))
+	writeJSON(w, http.StatusOK, map[string]string{"level": logbuf.LevelName(lvl)})
 }
 
 // ---- What-if (dry-run) ----

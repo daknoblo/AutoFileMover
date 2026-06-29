@@ -23,6 +23,7 @@
 	<nav class="tabs">
 		<button class="tab active" data-tab="review">Review-Queue <span id="reviewCount" class="badge"></span></button>
 		<button class="tab" data-tab="history">Verlauf</button>
+		<button class="tab" data-tab="logs">Logs</button>
 		<button class="tab" data-tab="settings">Einstellungen</button>
 	</nav>
 
@@ -36,6 +37,25 @@
 		<section id="history" class="panel">
 			<h2>Verlauf</h2>
 			<div id="historyList" class="cards"></div>
+		</section>
+
+		<section id="logs" class="panel">
+			<div class="logs-bar">
+				<h2>Logs</h2>
+				<div class="logs-controls">
+					<label>Level
+						<select id="logLevel">
+							<option value="debug">DEBUG</option>
+							<option value="info">INFO</option>
+							<option value="warn">WARN</option>
+							<option value="error">ERROR</option>
+						</select>
+					</label>
+					<label class="checkbox"><input type="checkbox" id="logAutoScroll" checked /> Auto-Scroll</label>
+					<button id="logClear" class="btn small secondary" type="button">Ansicht leeren</button>
+				</div>
+			</div>
+			<pre id="logOutput" class="log-output"></pre>
 		</section>
 
 		<section id="settings" class="panel active-settings">

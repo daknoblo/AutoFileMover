@@ -10,6 +10,7 @@ import (
 
 	"github.com/daknoblo/AutoFileMover/internal/config"
 	"github.com/daknoblo/AutoFileMover/internal/engine"
+	"github.com/daknoblo/AutoFileMover/internal/logbuf"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 )
 
@@ -29,11 +30,13 @@ type Server struct {
 	cfg      config.Config
 	log      *slog.Logger
 	resyncer Resyncer
+	logs     *logbuf.Buffer
+	level    *slog.LevelVar
 }
 
 // NewServer creates the HTTP server.
-func NewServer(st *store.Store, eng *engine.Engine, cfg config.Config, log *slog.Logger, resyncer Resyncer) *Server {
-	return &Server{store: st, engine: eng, cfg: cfg, log: log, resyncer: resyncer}
+func NewServer(st *store.Store, eng *engine.Engine, cfg config.Config, log *slog.Logger, resyncer Resyncer, logs *logbuf.Buffer, level *slog.LevelVar) *Server {
+	return &Server{store: st, engine: eng, cfg: cfg, log: log, resyncer: resyncer, logs: logs, level: level}
 }
 
 // Handler builds the http.Handler with all routes.
@@ -61,6 +64,10 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/scan", s.handleScan)
 	mux.HandleFunc("PUT /api/dry-run", s.handleSetDryRun)
+
+	mux.HandleFunc("GET /api/logs", s.handleLogs)
+	mux.HandleFunc("GET /api/log-level", s.handleGetLogLevel)
+	mux.HandleFunc("PUT /api/log-level", s.handleSetLogLevel)
 
 	// Folder browser & per-folder descriptions (AI context).
 	mux.HandleFunc("GET /api/browse", s.handleBrowse)
