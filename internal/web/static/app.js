@@ -273,45 +273,48 @@ function reviewCard(item) {
 	// Manual target picker — revealed by "Set target manually"; collapses again
 	// once a target has been set or a folder created.
 	if (showTargetPicker) {
-		const actions = [el("span", { class: "picker-label", text: t("manual_target_label") })];
-
 		const libSelect = el("select");
 		libSelect.appendChild(el("option", { value: "", text: t("choose_lib") }));
 		libraries.forEach((l) => libSelect.appendChild(el("option", { value: String(l.id), text: `${l.name} (${l.kind})` })));
 		const subSelect = el("select", { style: "display:none" });
 		const applyTarget = async (subFolder) => {
 			const libId = parseInt(libSelect.value, 10);
-			if (!libId) return toast(t("need_lib"), true);
+			if (!libId) return;
 			try {
 				await api("POST", `/items/${item.id}/target`, { library_id: libId, sub_folder: subFolder || "" });
-				manualTargetItems.delete(item.id);
 				toast(t("target_set")); refreshAll();
 			} catch (e) { toast(e.message, true); }
 		};
-		libSelect.addEventListener("change", async () => {
-			const lib = libraries.find((l) => String(l.id) === libSelect.value);
-			subSelect.innerHTML = ""; subSelect.style.display = lib && lib.kind === "series" ? "" : "none";
+		// Load a series library's existing sub-folders into the second dropdown.
+		const loadSub = async (lib) => {
+			subSelect.innerHTML = "";
+			subSelect.style.display = lib && lib.kind === "series" ? "" : "none";
 			if (lib && lib.kind === "series") {
 				const folders = await api("GET", `/libraries/${lib.id}/folders`).catch(() => []);
 				subSelect.appendChild(el("option", { value: "", text: t("choose_series") }));
 				folders.forEach((f) => subSelect.appendChild(el("option", { value: f, text: f })));
 			}
+		};
+		libSelect.addEventListener("change", async () => {
+			const lib = libraries.find((l) => String(l.id) === libSelect.value);
+			await loadSub(lib);
+			// A non-series library has no sub-folder to choose, so selecting it sets
+			// the target (library root) immediately — no extra button click.
+			if (lib && lib.kind !== "series") applyTarget("");
 		});
-		// Picking an existing folder applies the target immediately — no extra click.
+		// Picking an existing series folder applies the target immediately too.
 		subSelect.addEventListener("change", () => { if (subSelect.value) applyTarget(subSelect.value); });
-		// Pre-select the current/suggested library so an override starts from the
-		// existing choice and series sub-folders load right away.
+		// Pre-select the current/suggested library and load its folders WITHOUT
+		// applying, so merely rendering the card never sets a target.
 		const preLib = item.target_library_id || item.suggested_library_id;
 		if (preLib && libraries.some((l) => l.id === preLib)) {
 			libSelect.value = String(preLib);
-			libSelect.dispatchEvent(new Event("change"));
+			loadSub(libraries.find((l) => l.id === preLib));
 		}
-		// Explicit set is only needed to target a library root (e.g. movies); for
-		// series the folder dropdown above already applies on selection.
-		const setBtn = el("button", { class: "btn small secondary", text: t("set_target") });
-		setBtn.addEventListener("click", () => applyTarget(subSelect.value));
-		actions.push(libSelect, subSelect, setBtn);
-		children.push(el("div", { class: "card-actions" }, actions));
+		children.push(el("div", { class: "card-actions" }, [
+			el("span", { class: "picker-label", text: t("manual_target_label") }),
+			libSelect, subSelect,
+		]));
 
 		// Second row: create a NEW folder under the selected library. Pre-filled
 		// with the AI suggestion when there is one.
