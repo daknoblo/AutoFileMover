@@ -195,7 +195,17 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 				return nil
 			}
 		default:
-			return nil // already moved/confirmed/rejected
+			// Already moved/confirmed/rejected. If the source folder now holds no
+			// files at all (only the empty sub-folders left behind after its
+			// videos were moved out), clean those leftovers up.
+			if len(c.Files) == 0 && !settings.DryRun {
+				if err := mover.RemoveEmptyDirs(c.Path); err != nil {
+					e.log.Warn("cleanup empty leftover", "path", c.Path, "err", err)
+				} else {
+					e.log.Info("removed empty leftover folder", "path", c.Path)
+				}
+			}
+			return nil
 		}
 	}
 
@@ -546,13 +556,16 @@ func (e *Engine) execFile(item *store.Item, f *store.File, action string) error 
 	return nil
 }
 
-// finalize removes the emptied source folder once nothing is left to process.
+// finalize prunes the source folder once nothing is left to process: any
+// directories that became empty (e.g. the per-episode sub-folders of a season
+// pack whose videos were moved out) are removed, and the source folder itself
+// if it ends up empty.
 func (e *Engine) finalize(item *store.Item) {
 	if pendingWork(item.Files) {
 		return // work remaining
 	}
 	if !item.IsSingleFile() {
-		_ = mover.RemoveIfEmpty(item.SourcePath)
+		_ = mover.RemoveEmptyDirs(item.SourcePath)
 	}
 }
 

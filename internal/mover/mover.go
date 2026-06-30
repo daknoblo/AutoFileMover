@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 )
 
 // Move moves src (a file or directory) into destDir. The basename of src is
@@ -65,6 +67,45 @@ func RemoveIfEmpty(dir string) error {
 		return nil
 	}
 	return os.Remove(dir)
+}
+
+// RemoveEmptyDirs removes empty directories within root (deepest first) and root
+// itself if it ends up empty. Directories that still contain files are kept, so
+// it is safe to call on a partially-emptied source folder — it never deletes a
+// directory that holds files. This cleans up the empty per-episode sub-folders
+// a season pack leaves behind after its videos have been moved out.
+func RemoveEmptyDirs(root string) error {
+	var dirs []string
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil // ignore individual traversal errors
+		}
+		if d.IsDir() {
+			dirs = append(dirs, p)
+		}
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	// Process the deepest directories first so children are removed before their
+	// parents and the emptiness cascades upward.
+	sort.Slice(dirs, func(i, j int) bool {
+		return strings.Count(dirs[i], string(os.PathSeparator)) > strings.Count(dirs[j], string(os.PathSeparator))
+	})
+	for _, dir := range dirs {
+		entries, e := os.ReadDir(dir)
+		if e != nil {
+			continue
+		}
+		if len(entries) == 0 {
+			_ = os.Remove(dir)
+		}
+	}
+	return nil
 }
 
 // CheckWritable verifies that the process can actually create, move and delete
