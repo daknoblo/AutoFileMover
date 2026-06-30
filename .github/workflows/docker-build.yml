@@ -11,6 +11,11 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# Least-privilege default for every job. The build job widens this with
+# packages: write where it needs to push the image to GHCR.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

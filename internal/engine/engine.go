@@ -910,6 +910,11 @@ func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFold
 	if subFolder != "" {
 		destDir = filepath.Join(lib.Path, subFolder)
 	}
+	// Keep the destination inside the library: reject a sub-folder that escapes
+	// lib.Path via ".." (filepath.Rel yields a ".." prefix in that case).
+	if rel, relErr := filepath.Rel(lib.Path, destDir); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("ungültiger Zielordner: %s", subFolder)
+	}
 	if info, err := os.Stat(destDir); err != nil || !info.IsDir() {
 		return fmt.Errorf("Zielordner existiert nicht: %s", destDir)
 	}
@@ -1047,8 +1052,9 @@ func (e *Engine) applyNewFolder(ctx context.Context, item *store.Item, lib store
 		return fmt.Errorf("ungültiger Ordnername")
 	}
 	dir := filepath.Join(lib.Path, folder)
-	// Safety: the new folder must be a direct child of the library path.
-	if filepath.Dir(dir) != filepath.Clean(lib.Path) {
+	// Safety: the new folder must be a direct child of the library path and may
+	// not escape it via ".."; filepath.Rel makes the containment explicit.
+	if rel, relErr := filepath.Rel(lib.Path, dir); relErr != nil || rel != folder {
 		return fmt.Errorf("ungültiger Ordnername")
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
