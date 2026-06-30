@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build stage ----
-FROM golang:1.26-alpine AS build
+# Run the Go compiler on the runner's NATIVE architecture and cross-compile for
+# the requested target platform. CGO is off and modernc SQLite is pure Go, so a
+# cross-compile is trivial and avoids slow QEMU emulation for the arm64 image.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 WORKDIR /src
 
 # Pure-Go build (modernc SQLite) so no C toolchain is required.
@@ -11,11 +14,14 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+ARG TARGETOS
+ARG TARGETARCH
 ARG VERSION=dev
 ARG CHANNEL=local
 ARG COMMIT=unknown
 ARG DATE=unknown
-RUN go build -trimpath -ldflags "-s -w \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w \
       -X github.com/daknoblo/AutoFileMover/internal/version.Version=${VERSION} \
       -X github.com/daknoblo/AutoFileMover/internal/version.Channel=${CHANNEL} \
       -X github.com/daknoblo/AutoFileMover/internal/version.Commit=${COMMIT} \
