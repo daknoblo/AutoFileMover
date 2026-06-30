@@ -199,7 +199,11 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 	if existing != nil {
 		switch existing.Status {
 		case store.StatusError:
-			// retry below
+			// A previous classification failed. Do NOT re-query the AI endpoint on
+			// every scan — that would hammer a failing endpoint indefinitely. Leave
+			// the item in error so it can be retried explicitly ("KI-Abgleich") or
+			// resolved by setting a target by hand during review.
+			return nil
 		case store.StatusPendingReview:
 			// Re-classify in the background only if it was never classified yet
 			// (e.g. detected before the AI endpoint was configured) AND an AI
@@ -535,6 +539,12 @@ func (e *Engine) PlanFileAction(ctx context.Context, id int64, relPath, action s
 		f.TargetPath = ""
 	}
 	e.detectConflicts(item.Files)
+	// Manually planning an action means the user is taking over a failed or
+	// unresolved classification: clear the error state and route it as review.
+	if item.Status == store.StatusError {
+		item.Status = store.StatusPendingReview
+		item.ErrorMessage = ""
+	}
 	return e.store.UpsertItem(ctx, item)
 }
 
@@ -892,6 +902,12 @@ func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFold
 		}
 	}
 	e.detectConflicts(item.Files)
+	// Setting a target by hand means the user is taking over a failed or
+	// unresolved classification: clear any error and route it as normal review.
+	if item.Status == store.StatusError {
+		item.Status = store.StatusPendingReview
+	}
+	item.ErrorMessage = ""
 	return e.store.UpsertItem(ctx, item)
 }
 

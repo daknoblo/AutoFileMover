@@ -27,6 +27,20 @@ Web-Oberfläche mit (für Betrieb hinter einem Reverse Proxy gedacht).
    landet das Element in der **Review-Queue** und kann in der UI manuell
    bestätigt oder abgelehnt werden.
 
+### Manuelles Ziel & Fehlerfälle
+
+Liefert die KI keine brauchbare Einschätzung (Fehler des Endpoints, 0 % Konfidenz
+oder kein auflösbares Ziel), blendet die Review-Karte automatisch die manuelle
+**Ziel-Auswahl** (Bibliothek + optionaler Serienordner) ein. Karten mit bereits
+aufgelöstem Ziel bieten zusätzlich „Ziel manuell wählen“ zum Überschreiben.
+Anschließend markiert man die Datei(en) mit den Move/Delete/Review-Buttons und
+führt den Plan aus; das Setzen eines Ziels von Hand löscht den Fehler und stellt
+das Element auf normales Review.
+
+Ein **fehlgeschlagener** KI-Aufruf wird beim erneuten Scan **nicht** automatisch
+wiederholt – der Endpoint wird also nicht endlos angefragt. Ein neuer Versuch
+erfolgt nur explizit über „KI-Abgleich“.
+
 ### Regeln für die Zuordnung
 
 - **Film / Dokumentation** → Element wird in den Bibliotheksordner verschoben.

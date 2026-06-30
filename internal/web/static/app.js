@@ -7,6 +7,9 @@ let libraries = [];
 // Folder review cards are collapsed by default; track the ones the user has
 // expanded so the state survives re-renders.
 const expandedItems = new Set();
+// Items where the user explicitly opened the manual target picker even though
+// the AI already resolved a destination (override). Survives re-renders.
+const manualTargetItems = new Set();
 
 function fmtSize(n) {
 	if (!n) return "";
@@ -203,14 +206,21 @@ function reviewCard(item) {
 	const errBox = item.error_message ? el("div", { class: "card-sub err", text: t("error") + ": " + item.error_message }) : null;
 
 	const files = item.files || [];
+	const hasRealFiles = files.some((f) => f.rel_path);
 	const needsTarget = files.some((f) => f.action === "move" && !f.target_path && !f.done);
 	const hasWork = files.some((f) => (f.action === "move" || f.action === "delete") && !f.done);
 	const hasConflict = files.some((f) => f.action === "move" && f.conflict && !f.done);
+	// Offer a manual target whenever the AI gave no usable destination (error,
+	// 0% confidence or nothing resolved) or the user explicitly asked to pick one.
+	const wantsManual = manualTargetItems.has(item.id);
+	const noGoodGuess = item.status === "error" || !item.target_path || !item.probability;
+	const showTargetPicker = hasRealFiles && (needsTarget || wantsManual || noGoodGuess);
 	const children = [head, errBox, fileRows(item, true)];
 
-	// Fallback target picker — only when a file wants to move but has no target.
-	if (needsTarget) {
-		const actions = [];
+	// Manual target picker: shown automatically when the AI gave no usable
+	// destination, and on demand (override) for already-resolved items.
+	if (showTargetPicker) {
+		const actions = [el("span", { class: "picker-label", text: t("manual_target_label") })];
 
 		// One-click create of the AI-suggested folder when it doesn't exist yet.
 		if (item.suggested_folder && item.suggested_library_id) {
@@ -237,6 +247,13 @@ function reviewCard(item) {
 				folders.forEach((f) => subSelect.appendChild(el("option", { value: f, text: f })));
 			}
 		});
+		// Pre-select the current/suggested library so an override starts from the
+		// existing choice and series sub-folders load right away.
+		const preLib = item.target_library_id || item.suggested_library_id;
+		if (preLib && libraries.some((l) => l.id === preLib)) {
+			libSelect.value = String(preLib);
+			libSelect.dispatchEvent(new Event("change"));
+		}
 		const setBtn = el("button", { class: "btn small secondary", text: t("set_target") });
 		setBtn.addEventListener("click", async () => {
 			const libId = parseInt(libSelect.value, 10);
@@ -248,6 +265,11 @@ function reviewCard(item) {
 		});
 		actions.push(libSelect, subSelect, setBtn);
 		children.push(el("div", { class: "card-actions" }, actions));
+	} else if (hasRealFiles) {
+		// Target already resolved by the AI: offer an unobtrusive manual override.
+		const manualBtn = el("button", { class: "btn small secondary", text: t("manual_target") });
+		manualBtn.addEventListener("click", () => { manualTargetItems.add(item.id); refreshAll(); });
+		children.push(el("div", { class: "card-actions" }, [manualBtn]));
 	}
 
 	const reBtn = el("button", { class: "btn small secondary", text: t("reanalyze") });
