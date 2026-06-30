@@ -52,7 +52,9 @@ func (s *Server) validatePath(p string) error {
 	}
 	clean := filepath.Clean(p)
 	root := filepath.Clean(s.cfg.MediaRoot)
-	if clean != root && !strings.HasPrefix(clean, root+string(os.PathSeparator)) {
+	// Keep clean inside the media root: filepath.Rel yields a path starting with
+	// ".." when clean escapes root, which we reject.
+	if rel, relErr := filepath.Rel(root, clean); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return fmt.Errorf("path must be inside the media root (%s)", root)
 	}
 	info, err := os.Stat(clean)
@@ -588,8 +590,9 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		p = root
 	}
 	clean := filepath.Clean(p)
-	// Constrain browsing to the media root.
-	if clean != root && !strings.HasPrefix(clean, root+string(os.PathSeparator)) {
+	// Constrain browsing to the media root; fall back to the root when the
+	// requested path escapes it (filepath.Rel yields a ".." prefix in that case).
+	if rel, relErr := filepath.Rel(root, clean); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		clean = root
 	}
 	info, err := os.Stat(clean)

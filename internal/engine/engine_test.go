@@ -130,6 +130,49 @@ func TestCreateTargetFolder(t *testing.T) {
 	}
 }
 
+// TestSetItemTargetRejectsTraversal guards against a path-traversal regression:
+// a sub-folder containing ".." must not let the move target escape the library.
+func TestSetItemTargetRejectsTraversal(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Serien")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := st.AddLibrary(ctx, "Serien", store.KindSeries, libDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A real directory outside the library that the "../" sub-folder resolves to.
+	outside := filepath.Join(dir, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	item := &store.Item{
+		SourcePath: filepath.Join(dir, "src", "Show"),
+		Name:       "Show",
+		Status:     store.StatusPendingReview,
+		Files:      []store.File{{RelPath: "ep.mkv", Action: store.FileActionMove}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.SetItemTarget(ctx, item.ID, lib.ID, "../outside"); err == nil {
+		t.Fatal("expected SetItemTarget to reject a '..' sub-folder")
+	}
+
+	got, err := st.GetItem(ctx, item.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get item: %v", err)
+	}
+	if got.TargetPath == outside {
+		t.Errorf("target escaped the library to %q", got.TargetPath)
+	}
+}
+
 func testEngine(t *testing.T) (*Engine, *store.Store, string) {
 	t.Helper()
 	dir := t.TempDir()
