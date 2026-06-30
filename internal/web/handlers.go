@@ -405,6 +405,30 @@ func (s *Server) handlePlanFileAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "planned"})
 }
 
+// handleResolveConflict records the user's choice for a file that collides with
+// an existing target file: "replace" (overwrite) or "keep" (keep the existing
+// file and drop the incoming duplicate).
+func (s *Server) handleResolveConflict(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var body struct {
+		RelPath    string `json:"rel_path"`
+		Resolution string `json:"resolution"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if err := s.engine.ResolveConflict(r.Context(), id, body.RelPath, body.Resolution); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
+}
+
 // handleReclassifyItem re-runs the AI classification for one item and updates
 // the suggested per-file actions without executing anything.
 func (s *Server) handleReclassifyItem(w http.ResponseWriter, r *http.Request) {

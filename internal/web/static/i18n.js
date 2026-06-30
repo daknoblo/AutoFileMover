@@ -45,6 +45,11 @@ const I18N = {
 		log_level_setting: "Log-Level", log_level_hint: "Detailgrad der Logs (DEBUG zeigt die KI-Anfragen).", log_level_set: "Log-Level:",
 		collapse_hint: "Zum Ein-/Ausklappen klicken",
 		file_one: "Datei", file_many: "Dateien",
+		conflict_title: "Bereits im Ziel vorhanden", conflict_badge: "Konflikt",
+		conflict_hint: "Eine gleich benannte Datei oder dieselbe Episode existiert schon im Ziel. Wähle, welche behalten wird.",
+		conflict_new: "Neu", conflict_existing: "Vorhanden",
+		conflict_replace: "Neue übernehmen (ersetzen)", conflict_keep: "Vorhandene behalten (neue löschen)",
+		conflict_resolved: "Konflikt aufgelöst",
 	},
 	en: {
 		whatif: "What-if mode", whatif_hint: "In what-if mode no files are moved.",
@@ -87,6 +92,11 @@ const I18N = {
 		log_level_setting: "Log level", log_level_hint: "Log detail level (DEBUG shows the AI requests).", log_level_set: "Log level:",
 		collapse_hint: "Click to collapse/expand",
 		file_one: "file", file_many: "files",
+		conflict_title: "Already in target", conflict_badge: "Conflict",
+		conflict_hint: "A file with the same name or the same episode already exists in the target. Choose which one to keep.",
+		conflict_new: "New", conflict_existing: "Existing",
+		conflict_replace: "Use new (replace)", conflict_keep: "Keep existing (delete new)",
+		conflict_resolved: "Conflict resolved",
 	},
 };
 

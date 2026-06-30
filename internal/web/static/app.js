@@ -105,6 +105,7 @@ function fileRows(item, interactive) {
 			el("span", { class: "fname", text: name, title: name }),
 			(!isEmpty && f.size) ? el("span", { class: "fsize", text: fmtSize(f.size) }) : null,
 			prob,
+			f.conflict ? el("span", { class: "fbadge conflict", text: t("conflict_badge") }) : null,
 			f.done ? el("span", { class: "fdone", text: t("done") }) : null,
 		]);
 		// When the file will move, show its destination FOLDER under the file name.
@@ -134,8 +135,50 @@ function fileRows(item, interactive) {
 		}
 		const info = el("div", { class: "frow-info" }, [meta, targetEl]);
 		box.appendChild(el("div", { class: "frow" }, [info, acts]));
+		if (interactive && f.conflict) box.appendChild(conflictBlock(item, f));
 	});
 	return box;
+}
+
+// conflictBlock renders a side-by-side comparison of the file about to be moved
+// (the new release) and the existing file already in the target, with one-click
+// choices to replace it or keep the existing one.
+function conflictBlock(item, f) {
+	const c = f.conflict;
+	const newName = f.rel_path ? f.rel_path.split("/").pop() : "";
+	const qLine = (size, quality) => {
+		const parts = [];
+		if (size) parts.push(fmtSize(size));
+		if (quality) parts.push(quality);
+		return parts.join(" · ");
+	};
+	const col = (cls, label, name, size, quality) => el("div", { class: "cf-col " + cls }, [
+		el("div", { class: "cf-label", text: label }),
+		el("div", { class: "cf-name", text: name, title: name }),
+		el("div", { class: "cf-meta", text: qLine(size, quality) }),
+	]);
+	const replaceBtn = el("button", { class: "btn small", text: t("conflict_replace") });
+	replaceBtn.addEventListener("click", () => resolveConflict(item, f.rel_path, "replace"));
+	const keepBtn = el("button", { class: "btn small secondary", text: t("conflict_keep") });
+	keepBtn.addEventListener("click", () => resolveConflict(item, f.rel_path, "keep"));
+	return el("div", { class: "frow-conflict" }, [
+		el("div", { class: "cf-head", text: "⚠ " + t("conflict_title") }),
+		el("div", { class: "cf-hint", text: t("conflict_hint") }),
+		el("div", { class: "cf-cols" }, [
+			col("new", t("conflict_new"), newName, f.size, c.incoming_quality),
+			col("existing", t("conflict_existing"), c.existing_name, c.existing_size, c.existing_quality),
+		]),
+		el("div", { class: "cf-acts" }, [replaceBtn, keepBtn]),
+	]);
+}
+
+// resolveConflict records the user's keep/replace decision for a colliding file.
+async function resolveConflict(item, relPath, resolution) {
+	try {
+		await api("POST", `/items/${item.id}/conflict`, { rel_path: relPath, resolution });
+		toast(t("conflict_resolved"));
+		refreshAll();
+	} catch (e) { toast(e.message, true); }
 }
 
 // setFileAction stores the planned action for a file (no filesystem change).
@@ -162,6 +205,7 @@ function reviewCard(item) {
 	const files = item.files || [];
 	const needsTarget = files.some((f) => f.action === "move" && !f.target_path && !f.done);
 	const hasWork = files.some((f) => (f.action === "move" || f.action === "delete") && !f.done);
+	const hasConflict = files.some((f) => f.action === "move" && f.conflict && !f.done);
 	const children = [head, errBox, fileRows(item, true)];
 
 	// Fallback target picker — only when a file wants to move but has no target.
@@ -224,7 +268,7 @@ function reviewCard(item) {
 		}
 	});
 	const applyBtn = el("button", { class: "btn small", text: t("apply_plan") });
-	applyBtn.disabled = !hasWork || needsTarget || dryRunActive;
+	applyBtn.disabled = !hasWork || needsTarget || hasConflict || dryRunActive;
 	if (dryRunActive) applyBtn.title = t("whatif_active");
 	applyBtn.addEventListener("click", async () => {
 		applyBtn.disabled = true;

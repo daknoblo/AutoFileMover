@@ -233,6 +233,27 @@ textarea {
 .fprob.high { color: var(--green); } .fprob.mid { color: var(--yellow); } .fprob.low { color: var(--red); }
 .card-sub.err { color: var(--red); }
 
+/* Collision badge + duplicate comparison block */
+.fbadge { font-size: 11px; padding: 2px 8px; border-radius: 10px; flex: 0 0 auto; white-space: nowrap; }
+.fbadge.conflict { background: rgba(248,81,73,.15); color: var(--red); border: 1px solid rgba(248,81,73,.4); }
+.frow-conflict {
+	margin: -2px 0 8px; padding: 10px 12px; border: 1px solid rgba(248,81,73,.4);
+	border-radius: 6px; background: rgba(248,81,73,.06);
+}
+.cf-head { color: var(--red); font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.cf-hint { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.cf-cols { display: flex; gap: 10px; flex-wrap: wrap; }
+.cf-col {
+	flex: 1 1 200px; min-width: 0; padding: 8px 10px;
+	border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2);
+}
+.cf-col.new { border-color: rgba(63,185,80,.4); }
+.cf-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; }
+.cf-col.new .cf-label { color: var(--green); }
+.cf-name { font-size: 13px; color: var(--text); word-break: break-all; }
+.cf-meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.cf-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
 .prob {
 	font-variant-numeric: tabular-nums;
 	font-weight: 600;
