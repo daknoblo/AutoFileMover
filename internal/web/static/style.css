@@ -276,6 +276,8 @@ textarea {
 
 .card-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
 .card-actions select { min-width: 160px; }
+.card-actions input.newfolder { min-width: 200px; flex: 1 1 200px; }
+.card-actions.newfolder-row { margin-top: 6px; }
 .picker-label { color: var(--muted); font-size: 12px; align-self: center; margin-right: 2px; }
 
 .toast {

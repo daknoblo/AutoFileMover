@@ -1002,7 +1002,36 @@ func (e *Engine) CreateTargetFolder(ctx context.Context, id int64) error {
 	if err != nil {
 		return fmt.Errorf("library not found")
 	}
-	dir := filepath.Join(lib.Path, item.SuggestedFolder)
+	return e.applyNewFolder(ctx, item, lib, item.SuggestedFolder)
+}
+
+// CreateNamedTargetFolder creates a new folder named folder directly under the
+// given library and sets it as the item's move target. Used during manual
+// review when the desired destination folder does not exist yet.
+func (e *Engine) CreateNamedTargetFolder(ctx context.Context, id, libraryID int64, folder string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	item, err := e.store.GetItem(ctx, id)
+	if err != nil || item == nil {
+		return fmt.Errorf("item not found")
+	}
+	lib, err := e.store.GetLibrary(ctx, libraryID)
+	if err != nil {
+		return fmt.Errorf("library not found")
+	}
+	return e.applyNewFolder(ctx, item, lib, folder)
+}
+
+// applyNewFolder creates <lib>/<name> (a direct child of the library path), sets
+// it as the item's move target, recomputes file destinations, clears any pending
+// suggestion/error and persists. The caller must hold e.mu.
+func (e *Engine) applyNewFolder(ctx context.Context, item *store.Item, lib store.Library, name string) error {
+	folder := sanitizeFolder(name)
+	if folder == "" {
+		return fmt.Errorf("ungültiger Ordnername")
+	}
+	dir := filepath.Join(lib.Path, folder)
 	// Safety: the new folder must be a direct child of the library path.
 	if filepath.Dir(dir) != filepath.Clean(lib.Path) {
 		return fmt.Errorf("ungültiger Ordnername")
@@ -1023,6 +1052,12 @@ func (e *Engine) CreateTargetFolder(ctx context.Context, id int64) error {
 		}
 	}
 	e.detectConflicts(item.Files)
+	// Creating a target by hand means the user is taking over a failed or
+	// unresolved classification: clear any error and route it as normal review.
+	if item.Status == store.StatusError {
+		item.Status = store.StatusPendingReview
+	}
+	item.ErrorMessage = ""
 	e.log.Info("created target folder", "dir", dir, "item", item.Name)
 	return e.store.UpsertItem(ctx, item)
 }

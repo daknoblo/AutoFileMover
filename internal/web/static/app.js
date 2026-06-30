@@ -222,18 +222,6 @@ function reviewCard(item) {
 	if (showTargetPicker) {
 		const actions = [el("span", { class: "picker-label", text: t("manual_target_label") })];
 
-		// One-click create of the AI-suggested folder when it doesn't exist yet.
-		if (item.suggested_folder && item.suggested_library_id) {
-			const sLib = libraries.find((l) => l.id === item.suggested_library_id);
-			const createBtn = el("button", { class: "btn small", text: t("create_folder") + ": " + item.suggested_folder });
-			if (sLib) createBtn.title = sLib.path + "/" + item.suggested_folder;
-			createBtn.addEventListener("click", async () => {
-				try { await api("POST", `/items/${item.id}/create-folder`); toast(t("folder_created")); refreshAll(); }
-				catch (e) { toast(e.message, true); }
-			});
-			actions.push(createBtn);
-		}
-
 		const libSelect = el("select");
 		libSelect.appendChild(el("option", { value: "", text: t("choose_lib") }));
 		libraries.forEach((l) => libSelect.appendChild(el("option", { value: String(l.id), text: `${l.name} (${l.kind})` })));
@@ -265,6 +253,26 @@ function reviewCard(item) {
 		});
 		actions.push(libSelect, subSelect, setBtn);
 		children.push(el("div", { class: "card-actions" }, actions));
+
+		// Second row: create a NEW folder under the selected library. Pre-filled
+		// with the AI suggestion when there is one.
+		const newFolder = el("input", { type: "text", class: "newfolder", "data-i18n-ph": "new_folder_ph", placeholder: t("new_folder_ph") });
+		if (item.suggested_folder) newFolder.value = item.suggested_folder;
+		const createBtn = el("button", { class: "btn small", text: t("create_folder") });
+		createBtn.addEventListener("click", async () => {
+			const libId = parseInt(libSelect.value, 10);
+			if (!libId) return toast(t("need_lib"), true);
+			const folder = newFolder.value.trim();
+			if (!folder) return toast(t("need_folder"), true);
+			try {
+				await api("POST", `/items/${item.id}/create-folder`, { library_id: libId, folder });
+				toast(t("folder_created")); refreshAll();
+			} catch (e) { toast(e.message, true); }
+		});
+		children.push(el("div", { class: "card-actions newfolder-row" }, [
+			el("span", { class: "picker-label", text: t("new_folder_label") }),
+			newFolder, createBtn,
+		]));
 	} else if (hasRealFiles) {
 		// Target already resolved by the AI: offer an unobtrusive manual override.
 		const manualBtn = el("button", { class: "btn small secondary", text: t("manual_target") });
