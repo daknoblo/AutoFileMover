@@ -123,6 +123,7 @@ h2 { margin-top: 0; }
 }
 @keyframes afm-spin { to { transform: rotate(360deg); } }
 .btn.secondary { background: var(--panel-2); border: 1px solid var(--border); }
+.btn.secondary.active { border-color: var(--accent); color: var(--accent); }
 .btn.danger { background: var(--red); }
 .btn.small { padding: 4px 10px; font-size: 13px; }
 

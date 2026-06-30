@@ -210,16 +210,68 @@ function reviewCard(item) {
 	const needsTarget = files.some((f) => f.action === "move" && !f.target_path && !f.done);
 	const hasWork = files.some((f) => (f.action === "move" || f.action === "delete") && !f.done);
 	const hasConflict = files.some((f) => f.action === "move" && f.conflict && !f.done);
-	// Offer a manual target whenever the AI gave no usable destination (error or
-	// nothing resolved) or the user explicitly asked to pick one. Once a target
-	// is set the picker hides again.
+	// The library picker stays hidden until the user clicks "Set target manually".
 	const wantsManual = manualTargetItems.has(item.id);
-	const noGoodGuess = item.status === "error" || !item.target_path;
-	const showTargetPicker = hasRealFiles && (needsTarget || wantsManual || noGoodGuess);
+	const showTargetPicker = hasRealFiles && wantsManual;
 	const children = [head, errBox, fileRows(item, true)];
 
-	// Manual target picker: shown automatically when the AI gave no usable
-	// destination, and on demand (override) for already-resolved items.
+	// Card actions, left -> right: Apply, Re-check, Reject, Set target manually.
+	const applyBtn = el("button", { class: "btn small", text: t("apply_plan") });
+	applyBtn.disabled = !hasWork || needsTarget || hasConflict || dryRunActive;
+	if (dryRunActive) applyBtn.title = t("whatif_active");
+	applyBtn.addEventListener("click", async () => {
+		applyBtn.disabled = true;
+		applyBtn.classList.add("loading");
+		applyBtn.textContent = t("applying");
+		loadStatus();
+		try {
+			await api("POST", `/items/${item.id}/confirm`);
+			toast(t("applied"));
+			refreshAll();
+		} catch (e) {
+			toast(e.message, true);
+			applyBtn.disabled = false;
+			applyBtn.classList.remove("loading");
+			applyBtn.textContent = t("apply_plan");
+		}
+	});
+	const reBtn = el("button", { class: "btn small secondary", text: t("reanalyze") });
+	reBtn.addEventListener("click", async () => {
+		reBtn.disabled = true;
+		reBtn.classList.add("loading");
+		reBtn.textContent = t("analyzing");
+		toast(t("analyzing"));
+		try {
+			await api("POST", `/items/${item.id}/reclassify`);
+			toast(t("reanalyzed"));
+			refreshAll();
+		} catch (e) {
+			toast(e.message, true);
+			reBtn.disabled = false;
+			reBtn.classList.remove("loading");
+			reBtn.textContent = t("reanalyze");
+		}
+	});
+	const rejectBtn = el("button", { class: "btn small secondary", text: t("reject") });
+	rejectBtn.addEventListener("click", async () => {
+		try { await api("POST", `/items/${item.id}/reject`); refreshAll(); }
+		catch (e) { toast(e.message, true); }
+	});
+	const cardActions = [applyBtn, reBtn, rejectBtn];
+	if (hasRealFiles) {
+		// Toggle the manual library picker below.
+		const manualBtn = el("button", { class: "btn small secondary" + (wantsManual ? " active" : ""), text: t("manual_target") });
+		manualBtn.addEventListener("click", () => {
+			if (manualTargetItems.has(item.id)) manualTargetItems.delete(item.id);
+			else manualTargetItems.add(item.id);
+			refreshAll();
+		});
+		cardActions.push(manualBtn);
+	}
+	children.push(el("div", { class: "card-actions" }, cardActions));
+
+	// Manual target picker — revealed by "Set target manually"; collapses again
+	// once a target has been set or a folder created.
 	if (showTargetPicker) {
 		const actions = [el("span", { class: "picker-label", text: t("manual_target_label") })];
 
@@ -232,6 +284,7 @@ function reviewCard(item) {
 			if (!libId) return toast(t("need_lib"), true);
 			try {
 				await api("POST", `/items/${item.id}/target`, { library_id: libId, sub_folder: subFolder || "" });
+				manualTargetItems.delete(item.id);
 				toast(t("target_set")); refreshAll();
 			} catch (e) { toast(e.message, true); }
 		};
@@ -272,6 +325,7 @@ function reviewCard(item) {
 			if (!folder) return toast(t("need_folder"), true);
 			try {
 				await api("POST", `/items/${item.id}/create-folder`, { library_id: libId, folder });
+				manualTargetItems.delete(item.id);
 				toast(t("folder_created")); refreshAll();
 			} catch (e) { toast(e.message, true); }
 		});
@@ -279,55 +333,7 @@ function reviewCard(item) {
 			el("span", { class: "picker-label", text: t("new_folder_label") }),
 			newFolder, createBtn,
 		]));
-	} else if (hasRealFiles) {
-		// Target already resolved by the AI: offer an unobtrusive manual override.
-		const manualBtn = el("button", { class: "btn small secondary", text: t("manual_target") });
-		manualBtn.addEventListener("click", () => { manualTargetItems.add(item.id); refreshAll(); });
-		children.push(el("div", { class: "card-actions" }, [manualBtn]));
 	}
-
-	const reBtn = el("button", { class: "btn small secondary", text: t("reanalyze") });
-	reBtn.addEventListener("click", async () => {
-		reBtn.disabled = true;
-		reBtn.classList.add("loading");
-		reBtn.textContent = t("analyzing");
-		toast(t("analyzing"));
-		try {
-			await api("POST", `/items/${item.id}/reclassify`);
-			toast(t("reanalyzed"));
-			refreshAll();
-		} catch (e) {
-			toast(e.message, true);
-			reBtn.disabled = false;
-			reBtn.classList.remove("loading");
-			reBtn.textContent = t("reanalyze");
-		}
-	});
-	const applyBtn = el("button", { class: "btn small", text: t("apply_plan") });
-	applyBtn.disabled = !hasWork || needsTarget || hasConflict || dryRunActive;
-	if (dryRunActive) applyBtn.title = t("whatif_active");
-	applyBtn.addEventListener("click", async () => {
-		applyBtn.disabled = true;
-		applyBtn.classList.add("loading");
-		applyBtn.textContent = t("applying");
-		loadStatus();
-		try {
-			await api("POST", `/items/${item.id}/confirm`);
-			toast(t("applied"));
-			refreshAll();
-		} catch (e) {
-			toast(e.message, true);
-			applyBtn.disabled = false;
-			applyBtn.classList.remove("loading");
-			applyBtn.textContent = t("apply_plan");
-		}
-	});
-	const rejectBtn = el("button", { class: "btn small secondary", text: t("reject") });
-	rejectBtn.addEventListener("click", async () => {
-		try { await api("POST", `/items/${item.id}/reject`); refreshAll(); }
-		catch (e) { toast(e.message, true); }
-	});
-	children.push(el("div", { class: "card-actions" }, [reBtn, applyBtn, rejectBtn]));
 
 	const card = el("div", { class: "card" + (collapsed ? " collapsed" : "") }, children);
 	head.addEventListener("click", () => {
