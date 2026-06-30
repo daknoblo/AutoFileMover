@@ -392,6 +392,51 @@ func TestSetItemTargetClearsError(t *testing.T) {
 	}
 }
 
+func TestSetItemTargetRoutesFilesToMove(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Filme")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := st.AddLibrary(ctx, "Filme", store.KindMovie, libDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src", "Movie")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "Movie",
+		Status:     store.StatusError,
+		Files: []store.File{
+			{RelPath: "movie.mkv"},                                  // undecided -> move
+			{RelPath: "sample.mkv", Action: store.FileActionDelete}, // explicit delete preserved
+			{RelPath: "extras.mkv", Action: store.FileActionKeep},   // explicit keep preserved
+		},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.SetItemTarget(ctx, item.ID, lib.ID, ""); err != nil {
+		t.Fatalf("set target: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.Files[0].Action != store.FileActionMove || got.Files[0].TargetPath != filepath.Join(libDir, "movie.mkv") {
+		t.Errorf("undecided file should route to move: %+v", got.Files[0])
+	}
+	if got.Files[1].Action != store.FileActionDelete {
+		t.Errorf("explicit delete should be preserved: %+v", got.Files[1])
+	}
+	if got.Files[2].Action != store.FileActionKeep {
+		t.Errorf("explicit keep should be preserved: %+v", got.Files[2])
+	}
+}
+
 func TestPlanFileActionClearsError(t *testing.T) {
 	eng, st, dir := testEngine(t)
 	ctx := context.Background()

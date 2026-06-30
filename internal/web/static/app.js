@@ -210,10 +210,11 @@ function reviewCard(item) {
 	const needsTarget = files.some((f) => f.action === "move" && !f.target_path && !f.done);
 	const hasWork = files.some((f) => (f.action === "move" || f.action === "delete") && !f.done);
 	const hasConflict = files.some((f) => f.action === "move" && f.conflict && !f.done);
-	// Offer a manual target whenever the AI gave no usable destination (error,
-	// 0% confidence or nothing resolved) or the user explicitly asked to pick one.
+	// Offer a manual target whenever the AI gave no usable destination (error or
+	// nothing resolved) or the user explicitly asked to pick one. Once a target
+	// is set the picker hides again.
 	const wantsManual = manualTargetItems.has(item.id);
-	const noGoodGuess = item.status === "error" || !item.target_path || !item.probability;
+	const noGoodGuess = item.status === "error" || !item.target_path;
 	const showTargetPicker = hasRealFiles && (needsTarget || wantsManual || noGoodGuess);
 	const children = [head, errBox, fileRows(item, true)];
 

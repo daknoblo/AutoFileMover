@@ -726,6 +726,26 @@ func anyUnresolvedConflict(files []store.File) bool {
 	return false
 }
 
+// routeFilesToTarget points every movable file at destDir. Files that are still
+// undecided (no action yet, e.g. a folder the AI never classified) are switched
+// to "move" so that picking a target by hand also plans the move. Explicit
+// delete/keep choices and already-done files are left untouched.
+func routeFilesToTarget(files []store.File, destDir string) {
+	for i := range files {
+		f := &files[i]
+		if f.Done || f.RelPath == "" {
+			continue
+		}
+		if f.Action == store.FileActionDelete || f.Action == store.FileActionKeep {
+			continue
+		}
+		f.Action = store.FileActionMove
+		f.TargetPath = filepath.Join(destDir, filepath.Base(f.RelPath))
+		f.Overwrite = false
+		f.OverwritePath = ""
+	}
+}
+
 // destEntry is a file already present in a target folder.
 type destEntry struct {
 	name string
@@ -871,8 +891,9 @@ func (e *Engine) ResolveConflict(ctx context.Context, id int64, relPath, resolut
 }
 
 // SetItemTarget assigns a target library (and optional series sub-folder) to an
-// item and recomputes the destination for every file planned to move. Used when
-// the AI could not resolve a target and the user picks one during review.
+// item and routes every movable file there: files already planned to move get a
+// recomputed destination, and undecided files (e.g. a folder the AI never
+// classified) are switched to "move". Explicit delete/keep choices are kept.
 func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFolder string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -894,13 +915,7 @@ func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFold
 	}
 	item.TargetLibraryID = &lib.ID
 	item.TargetPath = destDir
-	for i := range item.Files {
-		if item.Files[i].Action == store.FileActionMove && !item.Files[i].Done {
-			item.Files[i].TargetPath = filepath.Join(destDir, filepath.Base(item.Files[i].RelPath))
-			item.Files[i].Overwrite = false
-			item.Files[i].OverwritePath = ""
-		}
-	}
+	routeFilesToTarget(item.Files, destDir)
 	e.detectConflicts(item.Files)
 	// Setting a target by hand means the user is taking over a failed or
 	// unresolved classification: clear any error and route it as normal review.
@@ -1044,13 +1059,7 @@ func (e *Engine) applyNewFolder(ctx context.Context, item *store.Item, lib store
 	item.TargetPath = dir
 	item.SuggestedLibraryID = nil
 	item.SuggestedFolder = ""
-	for i := range item.Files {
-		if item.Files[i].Action == store.FileActionMove && !item.Files[i].Done {
-			item.Files[i].TargetPath = filepath.Join(dir, filepath.Base(item.Files[i].RelPath))
-			item.Files[i].Overwrite = false
-			item.Files[i].OverwritePath = ""
-		}
-	}
+	routeFilesToTarget(item.Files, dir)
 	e.detectConflicts(item.Files)
 	// Creating a target by hand means the user is taking over a failed or
 	// unresolved classification: clear any error and route it as normal review.
