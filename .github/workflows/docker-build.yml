@@ -79,6 +79,29 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # Persist the Go module + build cache across runs so the heavy
+      # modernc.org/sqlite compile is not repeated every build.
+      - name: Restore Go cache
+        id: go-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            go-build-cache
+            go-mod-cache
+          key: ${{ runner.os }}-gocache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gocache-
+
+      - name: Inject Go cache into BuildKit
+        uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          cache-map: |
+            {
+              "go-build-cache": "/root/.cache/go-build",
+              "go-mod-cache": "/go/pkg/mod"
+            }
+          skip-extraction: ${{ steps.go-cache.outputs.cache-hit }}
+
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
