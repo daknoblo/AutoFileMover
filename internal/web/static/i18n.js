@@ -43,6 +43,7 @@ const I18N = {
 		analyzing: "Analysiere…",
 		log_level_setting: "Log-Level", log_level_hint: "Detailgrad der Logs (DEBUG zeigt die KI-Anfragen).", log_level_set: "Log-Level:",
 		collapse_hint: "Zum Ein-/Ausklappen klicken",
+		file_one: "Datei", file_many: "Dateien",
 	},
 	en: {
 		whatif: "What-if mode", whatif_hint: "In what-if mode no files are moved.",
@@ -83,6 +84,7 @@ const I18N = {
 		analyzing: "Analyzing…",
 		log_level_setting: "Log level", log_level_hint: "Log detail level (DEBUG shows the AI requests).", log_level_set: "Log level:",
 		collapse_hint: "Click to collapse/expand",
+		file_one: "file", file_many: "files",
 	},
 };
 

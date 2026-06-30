@@ -4,8 +4,9 @@ function statusLabel(s) { return t("status_" + s) || s; }
 function actionLabel(a) { return t("action_" + a) || a; }
 
 let libraries = [];
-// Folder review cards the user has collapsed (kept across re-renders).
-const collapsedItems = new Set();
+// Folder review cards are collapsed by default; track the ones the user has
+// expanded so the state survives re-renders.
+const expandedItems = new Set();
 
 function fmtSize(n) {
 	if (!n) return "";
@@ -146,11 +147,14 @@ async function setFileAction(item, relPath, action) {
 }
 
 function reviewCard(item) {
-	const collapsed = collapsedItems.has(item.id);
+	const collapsed = !expandedItems.has(item.id);
 	const prob = el("span", { class: "prob " + probClass(item.probability), text: Math.round(item.probability * 100) + "%" });
+	const fileCount = (item.files || []).filter((f) => f.rel_path).length;
+	const countEl = el("span", { class: "file-count", text: fileCount + " " + (fileCount === 1 ? t("file_one") : t("file_many")) });
 	const head = el("div", { class: "card-head collapsible", title: t("collapse_hint") }, [
 		el("span", { class: "caret", text: "▾" }),
 		el("div", { class: "card-title", text: item.name, title: item.name }),
+		countEl,
 		prob,
 	]);
 	const errBox = item.error_message ? el("div", { class: "card-sub err", text: t("error") + ": " + item.error_message }) : null;
@@ -236,8 +240,8 @@ function reviewCard(item) {
 	const card = el("div", { class: "card" + (collapsed ? " collapsed" : "") }, children);
 	head.addEventListener("click", () => {
 		const nowCollapsed = card.classList.toggle("collapsed");
-		if (nowCollapsed) collapsedItems.add(item.id);
-		else collapsedItems.delete(item.id);
+		if (nowCollapsed) expandedItems.delete(item.id);
+		else expandedItems.add(item.id);
 	});
 	return card;
 }
