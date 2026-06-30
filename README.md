@@ -49,6 +49,25 @@ In der Review-Queue erscheint der Ordner mit allen Dateien, Aktions-Label und
 Prozent. Bei sicherem Auto-Move wird der Film verschoben, Reste gelöscht und der
 leere Quellordner entfernt; im What-If lässt sich alles vorab pro Datei steuern.
 
+### Kollisionen mit vorhandenen Dateien
+
+Bevor eine Datei verschoben wird, prüft der Dienst das Zielverzeichnis auf eine
+**bereits vorhandene** Datei – entweder mit identischem Namen oder mit derselben
+Episode (`SxxExx`) unter einem anderen Release-Namen. Wird eine gefunden, wandert
+das Element automatisch in die Review-Queue (kein Auto-Move, kein Überschreiben).
+
+Dort zeigt eine **Gegenüberstellung** beide Kandidaten nebeneinander: Dateiname,
+Größe und die aus dem Release-Namen abgeleiteten Qualitätsmerkmale (Auflösung,
+Codec, HDR/DV, Quelle – ganz ohne `ffprobe`, damit das Image schlank bleibt). Pro
+Konflikt entscheidet man:
+
+- **Neue übernehmen (ersetzen)** – die vorhandene Datei wird gelöscht und die neue
+  verschoben.
+- **Vorhandene behalten** – die vorhandene Datei bleibt, die neue (doppelte) wird
+  aus dem Quellordner entfernt.
+
+Solange ein Konflikt offen ist, bleibt „Plan ausführen“ deaktiviert.
+
 ### Sprache & Über
 
 Die Oberfläche ist zweisprachig (Deutsch/Englisch, Umschalter im Header). Der

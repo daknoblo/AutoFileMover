@@ -125,3 +125,173 @@ func TestCreateTargetFolder(t *testing.T) {
 		t.Errorf("move file target not set: %+v", got.Files)
 	}
 }
+
+func testEngine(t *testing.T) (*Engine, *store.Store, string) {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	eng := New(st, config.Config{MediaRoot: dir}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return eng, st, dir
+}
+
+func TestFindConflict(t *testing.T) {
+	entries := []destEntry{
+		{name: "Show.S01E01.1080p.WEB.H264-AAA.mkv", size: 100},
+		{name: "Show.S01E02.1080p.WEB.H264-AAA.mkv", size: 100},
+		{name: "poster.jpg", size: 10},
+	}
+	if m := findConflict("Show.S01E01.1080p.WEB.H264-AAA.mkv", entries); m == nil {
+		t.Error("exact-name collision not detected")
+	}
+	if m := findConflict("Show.S01E01.2160p.BluRay.H265-BBB.mkv", entries); m == nil || m.name != "Show.S01E01.1080p.WEB.H264-AAA.mkv" {
+		t.Errorf("same-episode collision not detected: %+v", m)
+	}
+	if m := findConflict("Show.S01E03.1080p.mkv", entries); m != nil {
+		t.Errorf("unexpected collision for new episode: %+v", m)
+	}
+	if m := findConflict("Random.Movie.2020.1080p.mkv", entries); m != nil {
+		t.Errorf("unexpected collision for unrelated movie: %+v", m)
+	}
+}
+
+func TestDetectAndReplaceConflict(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	// Target show folder already holds an older release of S01E01.
+	showDir := filepath.Join(dir, "Serien", "Show")
+	if err := os.MkdirAll(showDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldFile := filepath.Join(showDir, "Show.S01E01.720p.WEB.x264-OLD.mkv")
+	if err := os.WriteFile(oldFile, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Source item carries a newer release of the same episode (different name).
+	srcDir := filepath.Join(dir, "src", "Show.S01E01")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	newName := "Show.S01E01.1080p.WEB.H265-NEW.mkv"
+	if err := os.WriteFile(filepath.Join(srcDir, newName), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "Show.S01E01",
+		Status:     store.StatusPendingReview,
+		TargetPath: showDir,
+		Files: []store.File{{
+			RelPath:    newName,
+			Action:     store.FileActionMove,
+			TargetPath: filepath.Join(showDir, newName),
+		}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.detectConflicts(item.Files)
+	if item.Files[0].Conflict == nil {
+		t.Fatal("expected a conflict to be detected")
+	}
+	if item.Files[0].Conflict.ExistingName != "Show.S01E01.720p.WEB.x264-OLD.mkv" {
+		t.Errorf("wrong existing file recorded: %+v", item.Files[0].Conflict)
+	}
+	if item.Files[0].Conflict.IncomingQuality == "" {
+		t.Error("incoming quality summary should be populated")
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plan-apply must be blocked while the conflict is unresolved.
+	if err := eng.ApplyPlan(ctx, item.ID); err == nil {
+		t.Error("ApplyPlan should refuse an unresolved conflict")
+	}
+
+	if err := eng.ResolveConflict(ctx, item.ID, newName, "replace"); err != nil {
+		t.Fatalf("resolve replace: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.Files[0].Conflict != nil || !got.Files[0].Overwrite {
+		t.Fatalf("replace decision not recorded: %+v", got.Files[0])
+	}
+
+	if err := eng.execFile(got, &got.Files[0], store.FileActionMove); err != nil {
+		t.Fatalf("execFile move: %v", err)
+	}
+	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
+		t.Error("old existing file should have been removed on replace")
+	}
+	if _, err := os.Stat(filepath.Join(showDir, newName)); err != nil {
+		t.Errorf("new file should have been moved in: %v", err)
+	}
+}
+
+func TestResolveConflictKeep(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	showDir := filepath.Join(dir, "Serien", "Show")
+	if err := os.MkdirAll(showDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "Show.S02E05.1080p.WEB.H264-GRP.mkv"
+	existing := filepath.Join(showDir, name)
+	if err := os.WriteFile(existing, []byte("keepme"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src", "Show.S02E05")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srcFile := filepath.Join(srcDir, name)
+	if err := os.WriteFile(srcFile, []byte("dup"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "Show.S02E05",
+		Status:     store.StatusPendingReview,
+		TargetPath: showDir,
+		Files: []store.File{{
+			RelPath:    name,
+			Action:     store.FileActionMove,
+			TargetPath: filepath.Join(showDir, name),
+		}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	eng.detectConflicts(item.Files)
+	if item.Files[0].Conflict == nil {
+		t.Fatal("expected exact-name conflict")
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.ResolveConflict(ctx, item.ID, name, "keep"); err != nil {
+		t.Fatalf("resolve keep: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.Files[0].Action != store.FileActionDelete || got.Files[0].Conflict != nil {
+		t.Fatalf("keep decision not recorded: %+v", got.Files[0])
+	}
+
+	if err := eng.execFile(got, &got.Files[0], store.FileActionDelete); err != nil {
+		t.Fatalf("execFile delete: %v", err)
+	}
+	if _, err := os.Stat(existing); err != nil {
+		t.Error("existing file should be kept untouched")
+	}
+	if _, err := os.Stat(srcFile); !os.IsNotExist(err) {
+		t.Error("incoming duplicate should have been deleted from source")
+	}
+}

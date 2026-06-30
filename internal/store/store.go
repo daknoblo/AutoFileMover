@@ -76,6 +76,32 @@ type File struct {
 	TargetPath string `json:"target_path"`
 	// Done reports whether the planned action has already been carried out.
 	Done bool `json:"done"`
+	// Conflict describes an existing file in the target that collides with this
+	// move (same name or same episode). Nil when there is no collision or the
+	// user has already resolved it.
+	Conflict *FileConflict `json:"conflict,omitempty"`
+	// Overwrite is set when the user chose to replace the colliding target file;
+	// the existing file is then deleted before this file is moved in.
+	Overwrite bool `json:"overwrite,omitempty"`
+	// OverwritePath is the existing target file to delete when Overwrite is set.
+	// It may differ from TargetPath when the collision is a same-episode file
+	// under a different release name.
+	OverwritePath string `json:"overwrite_path,omitempty"`
+}
+
+// FileConflict captures a side-by-side comparison between a file about to be
+// moved and an existing file already present in the target folder, so the user
+// can decide which one to keep during review.
+type FileConflict struct {
+	// ExistingName/Path/Size describe the file already in the target folder.
+	ExistingName string `json:"existing_name"`
+	ExistingPath string `json:"existing_path"`
+	ExistingSize int64  `json:"existing_size"`
+	// ExistingQuality is the release-attribute summary parsed from the existing
+	// file's name (e.g. "1080p · H265 · WEB").
+	ExistingQuality string `json:"existing_quality"`
+	// IncomingQuality is the same summary for the file about to be moved.
+	IncomingQuality string `json:"incoming_quality"`
 }
 
 // Item is a detected download entry and its classification/move state.

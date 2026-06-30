@@ -15,6 +15,7 @@ import (
 
 	"github.com/daknoblo/AutoFileMover/internal/ai"
 	"github.com/daknoblo/AutoFileMover/internal/config"
+	"github.com/daknoblo/AutoFileMover/internal/mediainfo"
 	"github.com/daknoblo/AutoFileMover/internal/mover"
 	"github.com/daknoblo/AutoFileMover/internal/scanner"
 	"github.com/daknoblo/AutoFileMover/internal/store"
@@ -292,8 +293,10 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 	// Map the per-file AI decisions onto the scanned files and resolve a target
 	// path for every file that should move.
 	applyDecisions(item.Files, res.Files, destDir)
+	e.detectConflicts(item.Files)
 
-	canAuto := settings.AutoMove && ok && res.Confidence >= settings.Threshold && hasMovable(item.Files)
+	canAuto := settings.AutoMove && ok && res.Confidence >= settings.Threshold &&
+		hasMovable(item.Files) && !anyUnresolvedConflict(item.Files)
 	if !canAuto {
 		item.Status = store.StatusPendingReview
 		return e.store.UpsertItem(ctx, item)
@@ -341,6 +344,9 @@ func (e *Engine) ApplyPlan(ctx context.Context, id int64) error {
 	}
 	if anyUnresolvedMove(item.Files) {
 		return fmt.Errorf("kein Ziel aufgelöst – bitte zuerst eine Bibliothek/Datei wählen")
+	}
+	if anyUnresolvedConflict(item.Files) {
+		return fmt.Errorf("Konflikt mit vorhandener Datei – bitte zuerst auflösen (Ersetzen oder Vorhandene behalten)")
 	}
 	_ = e.store.UpdateItemStatus(ctx, id, store.StatusMoving, "")
 	e.startPhase(PhaseMoving, countPending(item.Files))
@@ -427,6 +433,7 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 		e.suggestFolder(item, lib, res)
 	}
 	applyDecisions(item.Files, res.Files, destDir)
+	e.detectConflicts(item.Files)
 	item.Status = store.StatusPendingReview
 	item.ErrorMessage = ""
 	mv, del, keep := countActions(res.Files)
@@ -519,11 +526,15 @@ func (e *Engine) PlanFileAction(ctx context.Context, id int64, relPath, action s
 		return fmt.Errorf("file already processed")
 	}
 	f.Action = action
+	f.Overwrite = false
+	f.OverwritePath = ""
+	f.Conflict = nil
 	if action == store.FileActionMove && relPath != "" && item.TargetPath != "" {
 		f.TargetPath = filepath.Join(item.TargetPath, filepath.Base(relPath))
 	} else {
 		f.TargetPath = ""
 	}
+	e.detectConflicts(item.Files)
 	return e.store.UpsertItem(ctx, item)
 }
 
@@ -579,10 +590,26 @@ func (e *Engine) execFile(item *store.Item, f *store.File, action string) error 
 		if dest == "" {
 			return fmt.Errorf("kein Zielordner für %s", f.RelPath)
 		}
+		if f.Overwrite {
+			// The user chose to replace a colliding target file: remove it first
+			// so the move can proceed (Move otherwise refuses to overwrite). The
+			// file to delete may differ from dest for a same-episode collision.
+			rm := f.OverwritePath
+			if rm == "" {
+				rm = dest
+			}
+			if err := mover.Delete(rm); err != nil {
+				return fmt.Errorf("vorhandene Datei ersetzen: %w", err)
+			}
+			e.log.Info("replacing existing target", "removed", rm, "dest", dest)
+		}
 		if _, err := mover.Move(src, filepath.Dir(dest)); err != nil {
 			return err
 		}
 		f.TargetPath = dest
+		f.Overwrite = false
+		f.OverwritePath = ""
+		f.Conflict = nil
 		e.log.Info("moved file", "file", f.RelPath, "dest", dest)
 	case store.FileActionDelete:
 		if err := mover.Delete(src); err != nil {
@@ -637,6 +664,10 @@ func applyDecisions(files []store.File, decisions []ai.FileDecision, destDir str
 		}
 	}
 	for i := range files {
+		// A fresh classification re-evaluates collisions from scratch.
+		files[i].Overwrite = false
+		files[i].OverwritePath = ""
+		files[i].Conflict = nil
 		d, ok := byPath[files[i].RelPath]
 		if !ok {
 			d, ok = byBase[filepath.Base(files[i].RelPath)]
@@ -674,9 +705,159 @@ func anyUnresolvedMove(files []store.File) bool {
 	return false
 }
 
+// anyUnresolvedConflict reports whether a file planned to move still collides
+// with an existing target file that the user has not resolved yet.
+func anyUnresolvedConflict(files []store.File) bool {
+	for i := range files {
+		if !files[i].Done && files[i].Action == store.FileActionMove && files[i].Conflict != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// destEntry is a file already present in a target folder.
+type destEntry struct {
+	name string
+	size int64
+}
+
+// videoExts are the extensions considered "the same episode" for similarity
+// matching; subtitles/nfo are only matched on an exact name.
+var videoExts = map[string]bool{
+	".mkv": true, ".mp4": true, ".avi": true, ".m4v": true,
+	".mov": true, ".ts": true, ".wmv": true, ".mpg": true, ".mpeg": true,
+}
+
+// detectConflicts scans each move file's destination folder and records a
+// FileConflict when an existing file would collide: either the exact same name,
+// or the same episode (SxxExx) for a video file. Files the user already chose to
+// overwrite, or that are not moving, have their conflict cleared.
+func (e *Engine) detectConflicts(files []store.File) {
+	dirCache := map[string][]destEntry{}
+	for i := range files {
+		f := &files[i]
+		if f.Done || f.Action != store.FileActionMove || f.TargetPath == "" || f.Overwrite {
+			f.Conflict = nil
+			continue
+		}
+		destDir := filepath.Dir(f.TargetPath)
+		entries, ok := dirCache[destDir]
+		if !ok {
+			entries = listDestEntries(destDir)
+			dirCache[destDir] = entries
+		}
+		incoming := filepath.Base(f.TargetPath)
+		match := findConflict(incoming, entries)
+		if match == nil {
+			f.Conflict = nil
+			continue
+		}
+		f.Conflict = &store.FileConflict{
+			ExistingName:    match.name,
+			ExistingPath:    filepath.Join(destDir, match.name),
+			ExistingSize:    match.size,
+			ExistingQuality: mediainfo.Parse(match.name).Summary(),
+			IncomingQuality: mediainfo.Parse(incoming).Summary(),
+		}
+	}
+}
+
+// findConflict returns the existing entry that collides with incoming: an exact
+// (case-insensitive) name match wins; otherwise a video file with the same
+// episode marker is considered the same content in a different release.
+func findConflict(incoming string, entries []destEntry) *destEntry {
+	for i := range entries {
+		if strings.EqualFold(entries[i].name, incoming) {
+			return &entries[i]
+		}
+	}
+	ep := mediainfo.Episode(incoming)
+	if ep == "" {
+		return nil
+	}
+	for i := range entries {
+		if !videoExts[strings.ToLower(filepath.Ext(entries[i].name))] {
+			continue
+		}
+		if mediainfo.Episode(entries[i].name) == ep {
+			return &entries[i]
+		}
+	}
+	return nil
+}
+
+// listDestEntries returns the regular files (not sub-directories) of dir.
+func listDestEntries(dir string) []destEntry {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	out := make([]destEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		var size int64
+		if info, err := e.Info(); err == nil {
+			size = info.Size()
+		}
+		out = append(out, destEntry{name: e.Name(), size: size})
+	}
+	return out
+}
+
 // RejectItem marks an item as rejected without moving anything.
 func (e *Engine) RejectItem(ctx context.Context, id int64) error {
 	return e.store.UpdateItemStatus(ctx, id, store.StatusRejected, "")
+}
+
+// ResolveConflict records the user's decision for a colliding move file:
+//   - "replace": delete the existing target file on execution and move the new
+//     one in (the new release wins).
+//   - "keep": keep the existing target file and drop the incoming duplicate by
+//     planning it for deletion from the source.
+//
+// Either way the conflict is cleared so the plan can be applied.
+func (e *Engine) ResolveConflict(ctx context.Context, id int64, relPath, resolution string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	item, err := e.store.GetItem(ctx, id)
+	if err != nil || item == nil {
+		return fmt.Errorf("item not found")
+	}
+	idx := -1
+	for i := range item.Files {
+		if item.Files[i].RelPath == relPath {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("file not found in item")
+	}
+	f := &item.Files[idx]
+	if f.Conflict == nil {
+		return fmt.Errorf("kein Konflikt für diese Datei")
+	}
+	switch resolution {
+	case "replace":
+		f.Action = store.FileActionMove
+		f.Overwrite = true
+		f.OverwritePath = f.Conflict.ExistingPath
+		f.Conflict = nil
+	case "keep":
+		f.Action = store.FileActionDelete
+		f.TargetPath = ""
+		f.Overwrite = false
+		f.OverwritePath = ""
+		f.Conflict = nil
+	default:
+		return fmt.Errorf("invalid resolution")
+	}
+	e.log.Info("conflict resolved", "item", item.Name, "file", relPath, "resolution", resolution)
+	return e.store.UpsertItem(ctx, item)
 }
 
 // SetItemTarget assigns a target library (and optional series sub-folder) to an
@@ -706,8 +887,11 @@ func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFold
 	for i := range item.Files {
 		if item.Files[i].Action == store.FileActionMove && !item.Files[i].Done {
 			item.Files[i].TargetPath = filepath.Join(destDir, filepath.Base(item.Files[i].RelPath))
+			item.Files[i].Overwrite = false
+			item.Files[i].OverwritePath = ""
 		}
 	}
+	e.detectConflicts(item.Files)
 	return e.store.UpsertItem(ctx, item)
 }
 
@@ -818,8 +1002,11 @@ func (e *Engine) CreateTargetFolder(ctx context.Context, id int64) error {
 	for i := range item.Files {
 		if item.Files[i].Action == store.FileActionMove && !item.Files[i].Done {
 			item.Files[i].TargetPath = filepath.Join(dir, filepath.Base(item.Files[i].RelPath))
+			item.Files[i].Overwrite = false
+			item.Files[i].OverwritePath = ""
 		}
 	}
+	e.detectConflicts(item.Files)
 	e.log.Info("created target folder", "dir", dir, "item", item.Name)
 	return e.store.UpsertItem(ctx, item)
 }
