@@ -190,6 +190,7 @@ textarea {
 .card.collapsed .caret { transform: rotate(-90deg); }
 .card.collapsed > *:not(.card-head) { display: none; }
 .card.collapsed { padding-bottom: 16px; }
+.file-count { color: var(--muted); font-size: 12px; white-space: nowrap; flex-shrink: 0; }
 .card-sub { color: var(--muted); font-size: 13px; margin: 4px 0; }
 .files { color: var(--muted); font-size: 12px; max-height: 120px; overflow: auto; margin: 8px 0; }
 .files div { padding: 1px 0; }
