@@ -33,9 +33,12 @@ Liefert die KI keine brauchbare Einschätzung (Fehler des Endpoints, 0 % Konfide
 oder kein auflösbares Ziel), blendet die Review-Karte automatisch die manuelle
 **Ziel-Auswahl** (Bibliothek + optionaler Serienordner) ein. Karten mit bereits
 aufgelöstem Ziel bieten zusätzlich „Ziel manuell wählen“ zum Überschreiben.
-Anschließend markiert man die Datei(en) mit den Move/Delete/Review-Buttons und
-führt den Plan aus; das Setzen eines Ziels von Hand löscht den Fehler und stellt
-das Element auf normales Review.
+Existiert der gewünschte Zielordner noch nicht, lässt sich in derselben Auswahl
+ein **neuer Ordner anlegen** (Name eingeben → „Ordner anlegen“; wird direkt
+unterhalb der Bibliothek erstellt und als Ziel gesetzt). Anschließend markiert
+man die Datei(en) mit den Move/Delete/Review-Buttons und führt den Plan aus; das
+Setzen oder Anlegen eines Ziels von Hand löscht den Fehler und stellt das Element
+auf normales Review.
 
 Ein **fehlgeschlagener** KI-Aufruf wird beim erneuten Scan **nicht** automatisch
 wiederholt – der Endpoint wird also nicht endlos angefragt. Ein neuer Versuch

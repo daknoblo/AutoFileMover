@@ -425,3 +425,88 @@ func TestPlanFileActionClearsError(t *testing.T) {
 		t.Errorf("action = %q, want delete", got.Files[0].Action)
 	}
 }
+
+func TestCreateNamedTargetFolder(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Serien")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := st.AddLibrary(ctx, "Serien", store.KindSeries, libDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src", "New.Show.S01E01")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath:   srcDir,
+		Name:         "New.Show.S01E01",
+		Status:       store.StatusError,
+		ErrorMessage: "classify: boom",
+		Files:        []store.File{{RelPath: "ep.mkv", Action: store.FileActionMove}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.CreateNamedTargetFolder(ctx, item.ID, lib.ID, "New Show"); err != nil {
+		t.Fatalf("create named folder: %v", err)
+	}
+	want := filepath.Join(libDir, "New Show")
+	if fi, err := os.Stat(want); err != nil || !fi.IsDir() {
+		t.Fatalf("folder not created: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.TargetPath != want {
+		t.Errorf("target = %q, want %q", got.TargetPath, want)
+	}
+	if got.Status != store.StatusPendingReview || got.ErrorMessage != "" {
+		t.Errorf("error should be cleared, got status=%q msg=%q", got.Status, got.ErrorMessage)
+	}
+	if got.Files[0].TargetPath != filepath.Join(want, "ep.mkv") {
+		t.Errorf("file target = %q, want %q", got.Files[0].TargetPath, filepath.Join(want, "ep.mkv"))
+	}
+}
+
+func TestCreateNamedTargetFolderContainsTraversal(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Serien")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := st.AddLibrary(ctx, "Serien", store.KindSeries, libDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src", "x")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "x",
+		Status:     store.StatusPendingReview,
+		Files:      []store.File{{RelPath: "ep.mkv", Action: store.FileActionMove}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	// A traversal attempt sanitises to a single segment under the library.
+	if err := eng.CreateNamedTargetFolder(ctx, item.ID, lib.ID, "../escape"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.TargetPath != filepath.Join(libDir, "escape") {
+		t.Errorf("target = %q, want a direct child of the library", got.TargetPath)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "escape")); !os.IsNotExist(err) {
+		t.Error("a traversal must not create a folder outside the library")
+	}
+}

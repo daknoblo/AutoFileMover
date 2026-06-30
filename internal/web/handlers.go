@@ -444,15 +444,32 @@ func (s *Server) handleReclassifyItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reclassified"})
 }
 
-// handleCreateItemFolder creates the AI-suggested destination folder for an item
-// and sets it as the move target.
+// handleCreateItemFolder creates a destination folder for an item and sets it as
+// the move target. With no body it creates the AI-suggested folder; with a
+// {library_id, folder} body it creates a folder named by the user under that
+// library (manual review when the desired folder does not exist yet).
 func (s *Server) handleCreateItemFolder(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.engine.CreateTargetFolder(r.Context(), id); err != nil {
+	var body struct {
+		LibraryID int64  `json:"library_id"`
+		Folder    string `json:"folder"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body) // body is optional (suggested-folder case sends none)
+	folder := strings.TrimSpace(body.Folder)
+	if folder != "" {
+		if body.LibraryID == 0 {
+			writeErr(w, http.StatusBadRequest, "library_id is required")
+			return
+		}
+		if err := s.engine.CreateNamedTargetFolder(r.Context(), id, body.LibraryID, folder); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else if err := s.engine.CreateTargetFolder(r.Context(), id); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
