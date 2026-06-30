@@ -227,8 +227,20 @@ function reviewCard(item) {
 	applyBtn.disabled = !hasWork || needsTarget || dryRunActive;
 	if (dryRunActive) applyBtn.title = t("whatif_active");
 	applyBtn.addEventListener("click", async () => {
-		try { await api("POST", `/items/${item.id}/confirm`); toast(t("applied")); refreshAll(); }
-		catch (e) { toast(e.message, true); }
+		applyBtn.disabled = true;
+		applyBtn.classList.add("loading");
+		applyBtn.textContent = t("applying");
+		loadStatus();
+		try {
+			await api("POST", `/items/${item.id}/confirm`);
+			toast(t("applied"));
+			refreshAll();
+		} catch (e) {
+			toast(e.message, true);
+			applyBtn.disabled = false;
+			applyBtn.classList.remove("loading");
+			applyBtn.textContent = t("apply_plan");
+		}
 	});
 	const rejectBtn = el("button", { class: "btn small secondary", text: t("reject") });
 	rejectBtn.addEventListener("click", async () => {
@@ -501,14 +513,17 @@ async function loadStatus() {
 		const bar = document.getElementById("scanBar");
 		const meta = document.getElementById("scanMeta");
 		if (p.active) {
-			const classifying = p.phase === "classifying";
-			phaseEl.textContent = classifying ? t("phase_classifying") : t("phase_scanning");
+			let label = t("phase_scanning");
+			if (p.phase === "classifying") label = t("phase_classifying");
+			else if (p.phase === "moving") label = t("phase_moving");
+			const withProgress = p.phase === "classifying" || p.phase === "moving";
+			phaseEl.textContent = label;
 			phaseEl.className = "scan-phase busy";
-			curEl.textContent = p.current ? (classifying ? "· " + p.current : "") : "";
-			bar.hidden = !classifying || !p.total;
+			curEl.textContent = (withProgress && p.current) ? "· " + p.current : "";
+			bar.hidden = !withProgress || !p.total;
 			document.getElementById("scanBarFill").style.width = (p.percent || 0) + "%";
 			const eta = p.eta_seconds ? ` · ${t("scan_eta")} ${fmtEta(p.eta_seconds)}` : "";
-			meta.textContent = (classifying && p.total) ? `${p.done}/${p.total} · ${p.percent || 0}%${eta}` : "";
+			meta.textContent = (withProgress && p.total) ? `${p.done}/${p.total} · ${p.percent || 0}%${eta}` : "";
 			scanWasActive = true;
 		} else {
 			phaseEl.textContent = t("phase_idle");
