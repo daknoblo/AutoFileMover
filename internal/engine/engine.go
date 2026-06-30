@@ -36,6 +36,7 @@ const (
 	PhaseIdle        = "idle"
 	PhaseScanning    = "scanning"
 	PhaseClassifying = "classifying"
+	PhaseMoving      = "moving"
 )
 
 // Progress describes the state of an in-flight scan for the UI status display.
@@ -75,8 +76,20 @@ func (e *Engine) GetProgress() Progress {
 
 // beginScan marks the start of a scan in the filesystem-reading phase.
 func (e *Engine) beginScan() {
+	e.startPhase(PhaseScanning, 0)
+}
+
+// startPhase resets the progress to an active state in the given phase.
+func (e *Engine) startPhase(phase string, total int) {
 	e.progMu.Lock()
-	e.prog = Progress{Active: true, Phase: PhaseScanning, startedAt: time.Now()}
+	e.prog = Progress{Active: true, Phase: phase, Total: total, startedAt: time.Now()}
+	e.progMu.Unlock()
+}
+
+// setPhase changes the current activity label without resetting progress.
+func (e *Engine) setPhase(phase string) {
+	e.progMu.Lock()
+	e.prog.Phase = phase
 	e.progMu.Unlock()
 }
 
@@ -88,7 +101,6 @@ func (e *Engine) setTotal(total int) {
 
 func (e *Engine) updateProgress(done int, current string) {
 	e.progMu.Lock()
-	e.prog.Phase = PhaseClassifying
 	e.prog.Done = done
 	e.prog.Current = current
 	if e.prog.Total > 0 {
@@ -150,6 +162,7 @@ func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
 		return
 	}
 	e.log.Info("scanning source", "path", sourcePath, "candidates", len(candidates))
+	e.setPhase(PhaseClassifying)
 	e.setTotal(len(candidates))
 	for i, c := range candidates {
 		e.updateProgress(i, c.Name)
@@ -299,7 +312,7 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 	if err := e.store.UpsertItem(ctx, item); err != nil {
 		return err
 	}
-	if err := e.executePlan(item); err != nil {
+	if err := e.executePlan(item, false); err != nil {
 		item.Status = store.StatusError
 		item.ErrorMessage = err.Error()
 		return e.store.UpsertItem(ctx, item)
@@ -330,7 +343,9 @@ func (e *Engine) ApplyPlan(ctx context.Context, id int64) error {
 		return fmt.Errorf("kein Ziel aufgelöst – bitte zuerst eine Bibliothek/Datei wählen")
 	}
 	_ = e.store.UpdateItemStatus(ctx, id, store.StatusMoving, "")
-	if err := e.executePlan(item); err != nil {
+	e.startPhase(PhaseMoving, countPending(item.Files))
+	defer e.finishProgress()
+	if err := e.executePlan(item, true); err != nil {
 		_ = e.store.UpdateItemStatus(ctx, id, store.StatusError, err.Error())
 		return err
 	}
@@ -382,6 +397,7 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 	}
 
 	e.beginScan()
+	e.setPhase(PhaseClassifying)
 	e.setTotal(1)
 	defer e.finishProgress()
 	e.updateProgress(0, item.Name)
@@ -458,6 +474,9 @@ func (e *Engine) ApplyFileAction(ctx context.Context, id int64, relPath, action 
 	if idx < 0 {
 		return fmt.Errorf("file not found in item")
 	}
+	e.startPhase(PhaseMoving, 1)
+	defer e.finishProgress()
+	e.updateProgress(0, filepath.Base(relPath))
 	if err := e.execFile(item, &item.Files[idx], action); err != nil {
 		return err
 	}
@@ -508,19 +527,41 @@ func (e *Engine) PlanFileAction(ctx context.Context, id int64, relPath, action s
 	return e.store.UpsertItem(ctx, item)
 }
 
-// executePlan runs every undecided move/delete file then cleans up.
-func (e *Engine) executePlan(item *store.Item) error {
+// executePlan runs every undecided move/delete file then cleans up. When
+// reportProgress is true it updates the shared Progress per file so the UI can
+// show the running file operation; the scan path passes false (its own progress
+// already covers it).
+func (e *Engine) executePlan(item *store.Item, reportProgress bool) error {
+	done := 0
 	for i := range item.Files {
 		f := &item.Files[i]
 		if f.Done || (f.Action != store.FileActionMove && f.Action != store.FileActionDelete) {
 			continue
 		}
+		if reportProgress {
+			e.updateProgress(done, filepath.Base(f.RelPath))
+		}
 		if err := e.execFile(item, f, f.Action); err != nil {
 			return err
 		}
+		done++
+	}
+	if reportProgress {
+		e.updateProgress(done, "")
 	}
 	e.finalize(item)
 	return nil
+}
+
+// countPending counts files still waiting for a move/delete.
+func countPending(files []store.File) int {
+	n := 0
+	for _, f := range files {
+		if !f.Done && (f.Action == store.FileActionMove || f.Action == store.FileActionDelete) {
+			n++
+		}
+	}
+	return n
 }
 
 // execFile moves or deletes a single file and marks it done.
