@@ -11,7 +11,8 @@ WORKDIR /src
 ENV CGO_ENABLED=0
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 COPY . .
 ARG TARGETOS
@@ -20,7 +21,8 @@ ARG VERSION=dev
 ARG CHANNEL=local
 ARG COMMIT=unknown
 ARG DATE=unknown
-RUN --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w \
       -X github.com/daknoblo/AutoFileMover/internal/version.Version=${VERSION} \
       -X github.com/daknoblo/AutoFileMover/internal/version.Channel=${CHANNEL} \
