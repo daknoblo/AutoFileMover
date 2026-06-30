@@ -104,9 +104,15 @@ function fileRows(item, interactive) {
 		const name = isEmpty ? t("empty_folder") : f.rel_path.split("/").pop();
 		const pct = f.probability ? Math.round(f.probability * 100) + "%" : "";
 		const prob = pct ? el("span", { class: "fprob " + probClass(f.probability), text: pct }) : null;
+		// Show media metadata (resolution / codec / HDR / source) together with the
+		// size in one place so the user can judge quality at a glance.
+		const infoBits = [];
+		if (f.quality) infoBits.push(f.quality);
+		if (!isEmpty && f.size) infoBits.push(fmtSize(f.size));
+		const infoStr = infoBits.join(" · ");
 		const meta = el("div", { class: "frow-meta" }, [
 			el("span", { class: "fname", text: name, title: name }),
-			(!isEmpty && f.size) ? el("span", { class: "fsize", text: fmtSize(f.size) }) : null,
+			infoStr ? el("span", { class: "fsize", text: infoStr }) : null,
 			prob,
 			f.conflict ? el("span", { class: "fbadge conflict", text: t("conflict_badge") }) : null,
 			f.done ? el("span", { class: "fdone", text: t("done") }) : null,

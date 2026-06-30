@@ -76,6 +76,10 @@ type File struct {
 	TargetPath string `json:"target_path"`
 	// Done reports whether the planned action has already been carried out.
 	Done bool `json:"done"`
+	// Quality is a display-only summary of release attributes parsed from the file
+	// name (e.g. "1080p · H265 · WEB"). It is filled in when items are served to the
+	// UI and is not persisted.
+	Quality string `json:"quality,omitempty"`
 	// Conflict describes an existing file in the target that collides with this
 	// move (same name or same episode). Nil when there is no collision or the
 	// user has already resolved it.
