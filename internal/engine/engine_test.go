@@ -4,12 +4,16 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/daknoblo/AutoFileMover/internal/ai"
 	"github.com/daknoblo/AutoFileMover/internal/config"
+	"github.com/daknoblo/AutoFileMover/internal/scanner"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 )
 
@@ -293,5 +297,131 @@ func TestResolveConflictKeep(t *testing.T) {
 	}
 	if _, err := os.Stat(srcFile); !os.IsNotExist(err) {
 		t.Error("incoming duplicate should have been deleted from source")
+	}
+}
+
+func TestProcessCandidateSkipsErrorItem(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	// A fully configured AI endpoint that must NOT be called for an error item.
+	if err := st.SaveAppSettings(ctx, store.AppSettings{
+		AIBaseURL: srv.URL, AIModel: "gpt", AIAPIKey: "k", Threshold: 0.8, AutoMove: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srcDir := filepath.Join(dir, "src", "Broken.Item")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath:   srcDir,
+		Name:         "Broken.Item",
+		Status:       store.StatusError,
+		ErrorMessage: "ai endpoint returned 500",
+		Files:        []store.File{{RelPath: "movie.mkv", Size: 1000}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	cand := scanner.Candidate{
+		Path:  srcDir,
+		Name:  "Broken.Item",
+		Files: []store.File{{RelPath: "movie.mkv", Size: 1000}},
+	}
+	if err := eng.processCandidate(ctx, cand, filepath.Dir(srcDir)); err != nil {
+		t.Fatalf("processCandidate: %v", err)
+	}
+	if n := atomic.LoadInt32(&hits); n != 0 {
+		t.Errorf("AI endpoint was queried %d times for an error item; want 0", n)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got == nil || got.Status != store.StatusError {
+		t.Errorf("error item should be left untouched, got %+v", got)
+	}
+}
+
+func TestSetItemTargetClearsError(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Filme")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := st.AddLibrary(ctx, "Filme", store.KindMovie, libDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src", "Movie")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath:   srcDir,
+		Name:         "Movie",
+		Status:       store.StatusError,
+		ErrorMessage: "classify: boom",
+		Files:        []store.File{{RelPath: "movie.mkv", Size: 10}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.SetItemTarget(ctx, item.ID, lib.ID, ""); err != nil {
+		t.Fatalf("set target: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.Status != store.StatusPendingReview {
+		t.Errorf("status = %q, want pending_review", got.Status)
+	}
+	if got.ErrorMessage != "" {
+		t.Errorf("error message should be cleared, got %q", got.ErrorMessage)
+	}
+	if got.TargetPath != libDir {
+		t.Errorf("target = %q, want %q", got.TargetPath, libDir)
+	}
+}
+
+func TestPlanFileActionClearsError(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	srcDir := filepath.Join(dir, "src", "Movie")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath:   srcDir,
+		Name:         "Movie",
+		Status:       store.StatusError,
+		ErrorMessage: "classify: boom",
+		Files:        []store.File{{RelPath: "movie.mkv", Size: 10}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.PlanFileAction(ctx, item.ID, "movie.mkv", store.FileActionDelete); err != nil {
+		t.Fatalf("plan file action: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.Status != store.StatusPendingReview {
+		t.Errorf("status = %q, want pending_review", got.Status)
+	}
+	if got.ErrorMessage != "" {
+		t.Errorf("error message should be cleared, got %q", got.ErrorMessage)
+	}
+	if got.Files[0].Action != store.FileActionDelete {
+		t.Errorf("action = %q, want delete", got.Files[0].Action)
 	}
 }
