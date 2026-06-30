@@ -13,6 +13,7 @@ import (
 
 	"github.com/daknoblo/AutoFileMover/internal/engine"
 	"github.com/daknoblo/AutoFileMover/internal/logbuf"
+	"github.com/daknoblo/AutoFileMover/internal/mediainfo"
 	"github.com/daknoblo/AutoFileMover/internal/mover"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 	"github.com/daknoblo/AutoFileMover/internal/version"
@@ -316,6 +317,15 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 	}
 	if items == nil {
 		items = []store.Item{}
+	}
+	// Enrich every file with a quality summary derived from its name so the UI
+	// can always show resolution/codec/source next to the size.
+	for i := range items {
+		for j := range items[i].Files {
+			if items[i].Files[j].RelPath != "" {
+				items[i].Files[j].Quality = mediainfo.Parse(items[i].Files[j].RelPath).Summary()
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, items)
 }
