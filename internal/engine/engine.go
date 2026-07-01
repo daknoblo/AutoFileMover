@@ -1051,6 +1051,11 @@ func (e *Engine) applyNewFolder(ctx context.Context, item *store.Item, lib store
 	if folder == "" {
 		return fmt.Errorf("ungültiger Ordnername")
 	}
+	// If a folder with this name already exists (case-insensitively), reuse it
+	// instead of creating a near-duplicate that differs only in case/spacing.
+	if existing := matchSubfolder(lib.Path, folder); existing != "" {
+		folder = existing
+	}
 	dir := filepath.Join(lib.Path, folder)
 	// Safety: the new folder must be a direct child of the library path and may
 	// not escape it via ".."; filepath.Rel makes the containment explicit.

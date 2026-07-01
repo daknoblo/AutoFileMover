@@ -598,3 +598,48 @@ func TestCreateNamedTargetFolderContainsTraversal(t *testing.T) {
 		t.Error("a traversal must not create a folder outside the library")
 	}
 }
+
+func TestCreateNamedTargetFolderReusesExisting(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Serien")
+	if err := os.MkdirAll(filepath.Join(libDir, "The Show"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := st.AddLibrary(ctx, "Serien", store.KindSeries, libDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src", "x")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "x",
+		Status:     store.StatusPendingReview,
+		Files:      []store.File{{RelPath: "ep.mkv", Action: store.FileActionMove}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	// Typing the folder name in a different case must reuse the existing folder,
+	// not create a near-duplicate that differs only in case.
+	if err := eng.CreateNamedTargetFolder(ctx, item.ID, lib.ID, "the show"); err != nil {
+		t.Fatalf("create/reuse folder: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if filepath.Base(got.TargetPath) != "The Show" {
+		t.Errorf("target = %q, want it to reuse the existing 'The Show' folder", got.TargetPath)
+	}
+	entries, _ := os.ReadDir(libDir)
+	if len(entries) != 1 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("expected exactly one folder in the library, got %v", names)
+	}
+}
