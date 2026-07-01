@@ -19,9 +19,9 @@ type Buffer struct {
 	out   io.Writer
 }
 
-// New creates a buffer keeping up to max lines, mirroring writes to out.
-func New(max int, out io.Writer) *Buffer {
-	return &Buffer{max: max, out: out}
+// New creates a buffer keeping up to maxLines lines, mirroring writes to out.
+func New(maxLines int, out io.Writer) *Buffer {
+	return &Buffer{max: maxLines, out: out}
 }
 
 // Write implements io.Writer.

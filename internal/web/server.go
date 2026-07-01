@@ -95,7 +95,22 @@ func (s *Server) Handler() http.Handler {
 	sub, _ := fs.Sub(staticFS, "static")
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
-	return logRequests(s.log, mux)
+	return logRequests(s.log, limitBody(mux))
+}
+
+// maxRequestBody caps how many bytes any request body may carry. It guards the
+// JSON decoders against a memory-exhaustion DoS from an oversized payload.
+const maxRequestBody = 1 << 20 // 1 MiB
+
+// limitBody wraps every request body in a MaxBytesReader so oversized payloads
+// are rejected up front instead of being buffered into memory.
+func limitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func logRequests(log *slog.Logger, next http.Handler) http.Handler {

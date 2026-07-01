@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	// modernc.org/sqlite registers the pure-Go "sqlite" database/sql driver.
 	_ "modernc.org/sqlite"
 )
 
@@ -46,14 +47,14 @@ type Source struct {
 
 // Library is a target media library (e.g. Movies, Series, Documentaries).
 type Library struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Kind      string    `json:"kind"`
-	Path      string    `json:"path"`
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+	Path string `json:"path"`
 	// UseSubfolders routes items into a per-title sub-folder of the library
 	// (series/documentaries) rather than straight into the library root (movies).
-	UseSubfolders bool  `json:"use_subfolders"`
-	CreatedAt time.Time `json:"created_at"`
+	UseSubfolders bool      `json:"use_subfolders"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // File-level action values: the engine plans one of these per file.
@@ -113,25 +114,25 @@ type FileConflict struct {
 
 // Item is a detected download entry and its classification/move state.
 type Item struct {
-	ID              int64     `json:"id"`
-	SourcePath      string    `json:"source_path"`
-	Name            string    `json:"name"`
-	DetectedType    string    `json:"detected_type"`
-	TargetLibraryID *int64    `json:"target_library_id"`
-	TargetPath      string    `json:"target_path"`
+	ID              int64  `json:"id"`
+	SourcePath      string `json:"source_path"`
+	Name            string `json:"name"`
+	DetectedType    string `json:"detected_type"`
+	TargetLibraryID *int64 `json:"target_library_id"`
+	TargetPath      string `json:"target_path"`
 	// SuggestedLibraryID and SuggestedFolder hold the AI's proposed destination
 	// when the matching folder does not exist yet, so the UI can offer to create
 	// it with one click.
-	SuggestedLibraryID *int64 `json:"suggested_library_id"`
-	SuggestedFolder    string `json:"suggested_folder"`
-	Probability     float64   `json:"probability"`
-	Status          string    `json:"status"`
-	Reasoning       string    `json:"reasoning"`
-	Files           []File    `json:"files"`
-	AIRaw           string    `json:"ai_raw"`
-	ErrorMessage    string    `json:"error_message"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	SuggestedLibraryID *int64    `json:"suggested_library_id"`
+	SuggestedFolder    string    `json:"suggested_folder"`
+	Probability        float64   `json:"probability"`
+	Status             string    `json:"status"`
+	Reasoning          string    `json:"reasoning"`
+	Files              []File    `json:"files"`
+	AIRaw              string    `json:"ai_raw"`
+	ErrorMessage       string    `json:"error_message"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // IsSingleFile reports whether the item is a single loose file rather than a
@@ -196,6 +197,7 @@ CREATE TABLE IF NOT EXISTS items (
 	updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
+CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at DESC);
 CREATE TABLE IF NOT EXISTS folder_notes (
 	path        TEXT PRIMARY KEY,
 	description TEXT NOT NULL DEFAULT '',

@@ -6,16 +6,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/daknoblo/AutoFileMover/internal/ai"
 	"github.com/daknoblo/AutoFileMover/internal/config"
-	"github.com/daknoblo/AutoFileMover/internal/mediainfo"
 	"github.com/daknoblo/AutoFileMover/internal/mover"
 	"github.com/daknoblo/AutoFileMover/internal/scanner"
 	"github.com/daknoblo/AutoFileMover/internal/store"
@@ -26,38 +22,16 @@ type Engine struct {
 	store *store.Store
 	cfg   config.Config
 	log   *slog.Logger
-	mu    sync.Mutex
+	// mu serializes an individual item mutation (one scan candidate or one user
+	// action). It is held per-candidate during a scan — never for the whole
+	// scan — so quick user actions can interleave between candidates.
+	mu sync.Mutex
+	// scanMu serializes whole scans against each other without blocking the
+	// per-item mu, so at most one ProcessSource runs at a time.
+	scanMu sync.Mutex
 
 	progMu sync.Mutex
 	prog   Progress
-}
-
-// Phase values for Progress.
-const (
-	PhaseIdle        = "idle"
-	PhaseScanning    = "scanning"
-	PhaseClassifying = "classifying"
-	PhaseMoving      = "moving"
-)
-
-// Progress describes the state of an in-flight scan for the UI status display.
-type Progress struct {
-	// Active is true while a scan is running.
-	Active bool `json:"active"`
-	// Phase is the current activity: idle, scanning or classifying.
-	Phase string `json:"phase"`
-	// Current is the name of the folder/file being processed right now.
-	Current string `json:"current"`
-	// Done is the number of candidates already processed.
-	Done int `json:"done"`
-	// Total is the number of candidates in this scan.
-	Total int `json:"total"`
-	// Percent is Done/Total as a whole number (0..100).
-	Percent int `json:"percent"`
-	// ETASeconds is the estimated remaining time in seconds.
-	ETASeconds int `json:"eta_seconds"`
-
-	startedAt time.Time
 }
 
 // New creates a new engine.
@@ -65,71 +39,79 @@ func New(st *store.Store, cfg config.Config, log *slog.Logger) *Engine {
 	return &Engine{store: st, cfg: cfg, log: log}
 }
 
-// GetProgress returns a snapshot of the current scan progress.
-func (e *Engine) GetProgress() Progress {
-	e.progMu.Lock()
-	defer e.progMu.Unlock()
-	if e.prog.Phase == "" {
-		e.prog.Phase = PhaseIdle
+// scanContext caches the per-scan inputs that would otherwise be re-loaded from
+// the database and re-read from disk for every candidate: the application
+// settings, the target libraries and a single reusable AI client. Folder notes
+// and each library's sub-folder listing are loaded lazily on first use, so a
+// scan that classifies nothing pays no extra I/O. A scanContext is used by a
+// single goroutine at a time (the scan holds e.mu), so it needs no lock. No
+// code path creates a new library sub-folder during a scan, which keeps the
+// memoized sub-folder listing consistent for the whole scan.
+type scanContext struct {
+	settings store.AppSettings
+	libs     []store.Library
+	client   *ai.Client
+
+	notes       map[string]string   // folder path -> description (loaded lazily)
+	notesLoaded bool                // whether notes has been loaded
+	subs        map[string][]string // library path -> immediate sub-folder names
+}
+
+// newScanContext loads the settings, libraries and AI client once for a scan.
+func (e *Engine) newScanContext(ctx context.Context) (*scanContext, error) {
+	settings, err := e.store.LoadAppSettings(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return e.prog
-}
-
-// beginScan marks the start of a scan in the filesystem-reading phase.
-func (e *Engine) beginScan() {
-	e.startPhase(PhaseScanning, 0)
-}
-
-// startPhase resets the progress to an active state in the given phase.
-func (e *Engine) startPhase(phase string, total int) {
-	e.progMu.Lock()
-	e.prog = Progress{Active: true, Phase: phase, Total: total, startedAt: time.Now()}
-	e.progMu.Unlock()
-}
-
-// setPhase changes the current activity label without resetting progress.
-func (e *Engine) setPhase(phase string) {
-	e.progMu.Lock()
-	e.prog.Phase = phase
-	e.progMu.Unlock()
-}
-
-func (e *Engine) setTotal(total int) {
-	e.progMu.Lock()
-	e.prog.Total = total
-	e.progMu.Unlock()
-}
-
-func (e *Engine) updateProgress(done int, current string) {
-	e.progMu.Lock()
-	e.prog.Done = done
-	e.prog.Current = current
-	if e.prog.Total > 0 {
-		e.prog.Percent = done * 100 / e.prog.Total
+	libs, err := e.store.ListLibraries(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if elapsed := time.Since(e.prog.startedAt).Seconds(); done > 0 && done < e.prog.Total {
-		e.prog.ETASeconds = int((elapsed / float64(done)) * float64(e.prog.Total-done))
-	} else {
-		e.prog.ETASeconds = 0
-	}
-	e.progMu.Unlock()
+	return &scanContext{
+		settings: settings,
+		libs:     libs,
+		client: ai.New(ai.Config{
+			BaseURL:    settings.AIBaseURL,
+			APIKey:     settings.AIAPIKey,
+			Model:      settings.AIModel,
+			APIVersion: settings.AIAPIVersion,
+			Logger:     e.log,
+		}),
+		subs: map[string][]string{},
+	}, nil
 }
 
-func (e *Engine) finishProgress() {
-	e.progMu.Lock()
-	e.prog.Active = false
-	e.prog.Phase = PhaseIdle
-	e.prog.Current = ""
-	e.prog.ETASeconds = 0
-	if e.prog.Total > 0 {
-		e.prog.Done = e.prog.Total
-		e.prog.Percent = 100
+// folderNotes returns the folder-note map, loading it once on first use.
+func (sc *scanContext) folderNotes(ctx context.Context, e *Engine) map[string]string {
+	if !sc.notesLoaded {
+		notes, err := e.store.FolderNotesByPath(ctx)
+		if err != nil {
+			e.log.Warn("load folder notes", "err", err)
+			notes = map[string]string{}
+		}
+		sc.notes = notes
+		sc.notesLoaded = true
 	}
-	e.progMu.Unlock()
+	return sc.notes
 }
 
-// ProcessAll scans every configured source folder.
+// subfolders returns (and memoizes) the immediate sub-directory names of a
+// library path so each library's directory is read at most once per scan.
+func (sc *scanContext) subfolders(libPath string) []string {
+	if v, ok := sc.subs[libPath]; ok {
+		return v
+	}
+	v := listSubfolders(libPath)
+	sc.subs[libPath] = v
+	return v
+}
+
+// ProcessAll scans every configured source folder. It returns early if ctx is
+// cancelled so a shutdown is not delayed by a full scan.
 func (e *Engine) ProcessAll(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	sources, err := e.store.ListSources(ctx)
 	if err != nil {
 		e.log.Error("list sources", "err", err)
@@ -141,6 +123,9 @@ func (e *Engine) ProcessAll(ctx context.Context) {
 	}
 	e.log.Info("scan started", "sources", len(sources))
 	for _, src := range sources {
+		if ctx.Err() != nil {
+			return
+		}
 		e.ProcessSource(ctx, src.Path)
 	}
 	e.log.Info("scan finished")
@@ -148,16 +133,20 @@ func (e *Engine) ProcessAll(ctx context.Context) {
 
 // ProcessSource scans a single source folder and processes stable candidates.
 func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	// Serialize scans against each other, but do NOT hold e.mu for the whole
+	// scan: it is taken per-candidate below so quick user actions can run
+	// between candidates instead of waiting for the entire scan to finish.
+	e.scanMu.Lock()
+	defer e.scanMu.Unlock()
 
-	var ignore []string
-	if settings, err := e.store.LoadAppSettings(ctx); err == nil {
-		ignore = settings.IgnorePatterns
+	sc, err := e.newScanContext(ctx)
+	if err != nil {
+		e.log.Error("scan setup", "path", sourcePath, "err", err)
+		return
 	}
 	e.beginScan()
 	defer e.finishProgress()
-	candidates, err := scanner.ScanSource(sourcePath, ignore)
+	candidates, err := scanner.ScanSource(sourcePath, sc.settings.IgnorePatterns)
 	if err != nil {
 		e.log.Error("scan source", "path", sourcePath, "err", err)
 		return
@@ -166,35 +155,31 @@ func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
 	e.setPhase(PhaseClassifying)
 	e.setTotal(len(candidates))
 	for i, c := range candidates {
+		if ctx.Err() != nil {
+			return
+		}
 		e.updateProgress(i, c.Name)
 		if !c.IsStable(e.cfg.StabilityWindow) {
 			e.log.Info("candidate not yet stable, skipping", "name", c.Name)
 			continue
 		}
-		if err := e.processCandidate(ctx, c, sourcePath); err != nil {
-			e.log.Error("process candidate", "path", c.Path, "err", err)
+		e.mu.Lock()
+		perr := e.processCandidate(ctx, sc, c, sourcePath)
+		e.mu.Unlock()
+		if perr != nil {
+			e.log.Error("process candidate", "path", c.Path, "err", perr)
 		}
 	}
 }
 
-func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sourcePath string) error {
+func (e *Engine) processCandidate(ctx context.Context, sc *scanContext, c scanner.Candidate, sourcePath string) error {
 	existing, err := e.store.FindItemBySource(ctx, c.Path)
 	if err != nil {
 		return err
 	}
 
-	settings, err := e.store.LoadAppSettings(ctx)
-	if err != nil {
-		return err
-	}
-	client := ai.New(ai.Config{
-		BaseURL:    settings.AIBaseURL,
-		APIKey:     settings.AIAPIKey,
-		Model:      settings.AIModel,
-		APIVersion: settings.AIAPIVersion,
-		Logger:     e.log,
-	})
-	aiConfigured := client.Configured()
+	settings := sc.settings
+	aiConfigured := sc.client.Configured()
 
 	if existing != nil {
 		switch existing.Status {
@@ -227,10 +212,7 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 		}
 	}
 
-	libs, err := e.store.ListLibraries(ctx)
-	if err != nil {
-		return err
-	}
+	libs := sc.libs
 
 	item := &store.Item{
 		SourcePath: c.Path,
@@ -261,11 +243,13 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 		return e.store.UpsertItem(ctx, item)
 	}
 
-	res, err := client.Classify(ctx, e.buildRequest(ctx, c.Name, c.Files, libs, sourcePath, settings.AIContext))
+	res, err := sc.client.Classify(ctx, e.buildRequest(ctx, sc, c.Name, c.Files, sourcePath))
 	if err != nil {
 		item.Status = store.StatusError
 		item.ErrorMessage = err.Error()
-		_ = e.store.UpsertItem(ctx, item)
+		if uerr := e.store.UpsertItem(ctx, item); uerr != nil {
+			e.log.Error("persist classify error", "name", c.Name, "err", uerr)
+		}
 		return fmt.Errorf("classify: %w", err)
 	}
 
@@ -296,8 +280,7 @@ func (e *Engine) processCandidate(ctx context.Context, c scanner.Candidate, sour
 
 	// Map the per-file AI decisions onto the scanned files and resolve a target
 	// path for every file that should move.
-	applyDecisions(item.Files, res.Files, destDir)
-	e.detectConflicts(item.Files)
+	e.applyAndDetect(item.Files, res.Files, destDir)
 
 	canAuto := settings.AutoMove && ok && res.Confidence >= settings.Threshold &&
 		hasMovable(item.Files) && !anyUnresolvedConflict(item.Files)
@@ -352,11 +335,15 @@ func (e *Engine) ApplyPlan(ctx context.Context, id int64) error {
 	if anyUnresolvedConflict(item.Files) {
 		return fmt.Errorf("Konflikt mit vorhandener Datei – bitte zuerst auflösen (Ersetzen oder Vorhandene behalten)")
 	}
-	_ = e.store.UpdateItemStatus(ctx, id, store.StatusMoving, "")
+	if uerr := e.store.UpdateItemStatus(ctx, id, store.StatusMoving, ""); uerr != nil {
+		e.log.Warn("update status to moving", "id", id, "err", uerr)
+	}
 	e.startPhase(PhaseMoving, countPending(item.Files))
 	defer e.finishProgress()
 	if err := e.executePlan(item, true); err != nil {
-		_ = e.store.UpdateItemStatus(ctx, id, store.StatusError, err.Error())
+		if uerr := e.store.UpdateItemStatus(ctx, id, store.StatusError, err.Error()); uerr != nil {
+			e.log.Error("persist plan error", "id", id, "err", uerr)
+		}
 		return err
 	}
 	item.Status = store.StatusConfirmed
@@ -387,23 +374,12 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 		return fmt.Errorf("nichts zu analysieren")
 	}
 
-	settings, err := e.store.LoadAppSettings(ctx)
+	sc, err := e.newScanContext(ctx)
 	if err != nil {
 		return err
 	}
-	client := ai.New(ai.Config{
-		BaseURL:    settings.AIBaseURL,
-		APIKey:     settings.AIAPIKey,
-		Model:      settings.AIModel,
-		APIVersion: settings.AIAPIVersion,
-		Logger:     e.log,
-	})
-	if !client.Configured() {
+	if !sc.client.Configured() {
 		return fmt.Errorf("KI-Endpoint nicht konfiguriert")
-	}
-	libs, err := e.store.ListLibraries(ctx)
-	if err != nil {
-		return err
 	}
 
 	e.beginScan()
@@ -413,7 +389,7 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 	e.updateProgress(0, item.Name)
 
 	sourcePath := filepath.Dir(item.SourcePath)
-	res, err := client.Classify(ctx, e.buildRequest(ctx, item.Name, item.Files, libs, sourcePath, settings.AIContext))
+	res, err := sc.client.Classify(ctx, e.buildRequest(ctx, sc, item.Name, item.Files, sourcePath))
 	if err != nil {
 		return fmt.Errorf("classify: %w", err)
 	}
@@ -424,7 +400,7 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 	item.AIRaw = fmt.Sprintf("type=%s library=%s series_folder=%s title=%s confidence=%.3f",
 		res.Type, res.Library, res.SeriesFolder, res.Title, res.Confidence)
 
-	lib, destDir, ok, _ := e.resolveTarget(res, libs)
+	lib, destDir, ok, _ := e.resolveTarget(res, sc.libs)
 	if ok && lib != nil {
 		lid := lib.ID
 		item.TargetLibraryID = &lid
@@ -436,8 +412,7 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 		item.TargetPath = ""
 		e.suggestFolder(item, lib, res)
 	}
-	applyDecisions(item.Files, res.Files, destDir)
-	e.detectConflicts(item.Files)
+	e.applyAndDetect(item.Files, res.Files, destDir)
 	item.Status = store.StatusPendingReview
 	item.ErrorMessage = ""
 	mv, del, keep := countActions(res.Files)
@@ -460,676 +435,4 @@ func countActions(files []ai.FileDecision) (move, del, keep int) {
 		}
 	}
 	return
-}
-
-// ApplyFileAction performs a single planned action (move or delete) for one file
-// inside an item. It is blocked while What-If is enabled.
-func (e *Engine) ApplyFileAction(ctx context.Context, id int64, relPath, action string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
-	}
-	if settings, err := e.store.LoadAppSettings(ctx); err == nil && settings.DryRun {
-		return fmt.Errorf("What-If-Modus aktiv: es werden keine Dateien verschoben oder gelöscht")
-	}
-	idx := -1
-	for i := range item.Files {
-		if item.Files[i].RelPath == relPath {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return fmt.Errorf("file not found in item")
-	}
-	e.startPhase(PhaseMoving, 1)
-	defer e.finishProgress()
-	e.updateProgress(0, filepath.Base(relPath))
-	if err := e.execFile(item, &item.Files[idx], action); err != nil {
-		return err
-	}
-	e.finalize(item)
-	if !pendingWork(item.Files) {
-		item.Status = store.StatusConfirmed
-		item.ErrorMessage = ""
-	}
-	return e.store.UpsertItem(ctx, item)
-}
-
-// PlanFileAction sets the planned action for a single file WITHOUT touching the
-// filesystem. The review UI uses it for the per-file toggle buttons; execution
-// happens later via ApplyPlan ("Apply").
-func (e *Engine) PlanFileAction(ctx context.Context, id int64, relPath, action string) error {
-	switch action {
-	case store.FileActionMove, store.FileActionDelete, store.FileActionKeep:
-	default:
-		return fmt.Errorf("invalid action")
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
-	}
-	idx := -1
-	for i := range item.Files {
-		if item.Files[i].RelPath == relPath {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return fmt.Errorf("file not found in item")
-	}
-	f := &item.Files[idx]
-	if f.Done {
-		return fmt.Errorf("file already processed")
-	}
-	f.Action = action
-	f.Overwrite = false
-	f.OverwritePath = ""
-	f.Conflict = nil
-	if action == store.FileActionMove && relPath != "" && item.TargetPath != "" {
-		f.TargetPath = filepath.Join(item.TargetPath, filepath.Base(relPath))
-	} else {
-		f.TargetPath = ""
-	}
-	e.detectConflicts(item.Files)
-	// Manually planning an action means the user is taking over a failed or
-	// unresolved classification: clear the error state and route it as review.
-	if item.Status == store.StatusError {
-		item.Status = store.StatusPendingReview
-		item.ErrorMessage = ""
-	}
-	return e.store.UpsertItem(ctx, item)
-}
-
-// executePlan runs every undecided move/delete file then cleans up. When
-// reportProgress is true it updates the shared Progress per file so the UI can
-// show the running file operation; the scan path passes false (its own progress
-// already covers it).
-func (e *Engine) executePlan(item *store.Item, reportProgress bool) error {
-	done := 0
-	for i := range item.Files {
-		f := &item.Files[i]
-		if f.Done || (f.Action != store.FileActionMove && f.Action != store.FileActionDelete) {
-			continue
-		}
-		if reportProgress {
-			e.updateProgress(done, filepath.Base(f.RelPath))
-		}
-		if err := e.execFile(item, f, f.Action); err != nil {
-			return err
-		}
-		done++
-	}
-	if reportProgress {
-		e.updateProgress(done, "")
-	}
-	e.finalize(item)
-	return nil
-}
-
-// countPending counts files still waiting for a move/delete.
-func countPending(files []store.File) int {
-	n := 0
-	for _, f := range files {
-		if !f.Done && (f.Action == store.FileActionMove || f.Action == store.FileActionDelete) {
-			n++
-		}
-	}
-	return n
-}
-
-// execFile moves or deletes a single file and marks it done.
-func (e *Engine) execFile(item *store.Item, f *store.File, action string) error {
-	src := filepath.Join(item.SourcePath, f.RelPath)
-	if item.IsSingleFile() {
-		src = item.SourcePath
-	}
-	switch action {
-	case store.FileActionMove:
-		dest := f.TargetPath
-		if dest == "" && item.TargetPath != "" {
-			dest = filepath.Join(item.TargetPath, filepath.Base(f.RelPath))
-		}
-		if dest == "" {
-			return fmt.Errorf("kein Zielordner für %s", f.RelPath)
-		}
-		if f.Overwrite {
-			// The user chose to replace a colliding target file: remove it first
-			// so the move can proceed (Move otherwise refuses to overwrite). The
-			// file to delete may differ from dest for a same-episode collision.
-			rm := f.OverwritePath
-			if rm == "" {
-				rm = dest
-			}
-			if err := mover.Delete(rm); err != nil {
-				return fmt.Errorf("vorhandene Datei ersetzen: %w", err)
-			}
-			e.log.Info("replacing existing target", "removed", rm, "dest", dest)
-		}
-		if _, err := mover.Move(src, filepath.Dir(dest)); err != nil {
-			return err
-		}
-		f.TargetPath = dest
-		f.Overwrite = false
-		f.OverwritePath = ""
-		f.Conflict = nil
-		e.log.Info("moved file", "file", f.RelPath, "dest", dest)
-	case store.FileActionDelete:
-		if err := mover.Delete(src); err != nil {
-			return err
-		}
-		e.log.Info("deleted file", "file", src)
-	default:
-		return fmt.Errorf("nichts zu tun für %s", f.RelPath)
-	}
-	f.Action = action
-	f.Done = true
-	return nil
-}
-
-// finalize prunes the source folder once nothing is left to process: any
-// directories that became empty (e.g. the per-episode sub-folders of a season
-// pack whose videos were moved out) are removed, and the source folder itself
-// if it ends up empty.
-func (e *Engine) finalize(item *store.Item) {
-	if pendingWork(item.Files) {
-		return // work remaining
-	}
-	if !item.IsSingleFile() {
-		_ = mover.RemoveEmptyDirs(item.SourcePath)
-	}
-}
-
-// pendingWork reports whether any move/delete file is still waiting to run.
-func pendingWork(files []store.File) bool {
-	for i := range files {
-		f := files[i]
-		if !f.Done && (f.Action == store.FileActionMove || f.Action == store.FileActionDelete) {
-			return true
-		}
-	}
-	return false
-}
-
-// applyDecisions maps the AI per-file decisions onto the item files and resolves
-// a destination path for every file that should move into destDir. Matching is
-// tolerant: it first tries the exact relative path, then falls back to the base
-// file name, so a model that returns a slightly different path still maps.
-func applyDecisions(files []store.File, decisions []ai.FileDecision, destDir string) {
-	byPath := make(map[string]ai.FileDecision, len(decisions))
-	byBase := make(map[string]ai.FileDecision, len(decisions))
-	for _, d := range decisions {
-		p := strings.TrimSpace(d.Path)
-		byPath[p] = d
-		base := filepath.Base(filepath.FromSlash(p))
-		if _, exists := byBase[base]; !exists {
-			byBase[base] = d
-		}
-	}
-	for i := range files {
-		// A fresh classification re-evaluates collisions from scratch.
-		files[i].Overwrite = false
-		files[i].OverwritePath = ""
-		files[i].Conflict = nil
-		d, ok := byPath[files[i].RelPath]
-		if !ok {
-			d, ok = byBase[filepath.Base(files[i].RelPath)]
-		}
-		if !ok {
-			files[i].Action = store.FileActionKeep
-			continue
-		}
-		files[i].Action = d.Action
-		files[i].Probability = d.Confidence
-		files[i].Reason = d.Reason
-		if d.Action == store.FileActionMove && destDir != "" {
-			files[i].TargetPath = filepath.Join(destDir, filepath.Base(files[i].RelPath))
-		}
-	}
-}
-
-// hasMovable reports whether at least one file is planned to move with a target.
-func hasMovable(files []store.File) bool {
-	for _, f := range files {
-		if f.Action == store.FileActionMove && f.TargetPath != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// anyUnresolvedMove reports whether a file should move but has no target yet.
-func anyUnresolvedMove(files []store.File) bool {
-	for _, f := range files {
-		if !f.Done && f.Action == store.FileActionMove && f.TargetPath == "" {
-			return true
-		}
-	}
-	return false
-}
-
-// anyUnresolvedConflict reports whether a file planned to move still collides
-// with an existing target file that the user has not resolved yet.
-func anyUnresolvedConflict(files []store.File) bool {
-	for i := range files {
-		if !files[i].Done && files[i].Action == store.FileActionMove && files[i].Conflict != nil {
-			return true
-		}
-	}
-	return false
-}
-
-// routeFilesToTarget points every movable file at destDir. Files that are still
-// undecided (no action yet, e.g. a folder the AI never classified) are switched
-// to "move" so that picking a target by hand also plans the move. Explicit
-// delete/keep choices and already-done files are left untouched.
-func routeFilesToTarget(files []store.File, destDir string) {
-	for i := range files {
-		f := &files[i]
-		if f.Done || f.RelPath == "" {
-			continue
-		}
-		if f.Action == store.FileActionDelete || f.Action == store.FileActionKeep {
-			continue
-		}
-		f.Action = store.FileActionMove
-		f.TargetPath = filepath.Join(destDir, filepath.Base(f.RelPath))
-		f.Overwrite = false
-		f.OverwritePath = ""
-	}
-}
-
-// destEntry is a file already present in a target folder.
-type destEntry struct {
-	name string
-	size int64
-}
-
-// videoExts are the extensions considered "the same episode" for similarity
-// matching; subtitles/nfo are only matched on an exact name.
-var videoExts = map[string]bool{
-	".mkv": true, ".mp4": true, ".avi": true, ".m4v": true,
-	".mov": true, ".ts": true, ".wmv": true, ".mpg": true, ".mpeg": true,
-}
-
-// detectConflicts scans each move file's destination folder and records a
-// FileConflict when an existing file would collide: either the exact same name,
-// or the same episode (SxxExx) for a video file. Files the user already chose to
-// overwrite, or that are not moving, have their conflict cleared.
-func (e *Engine) detectConflicts(files []store.File) {
-	dirCache := map[string][]destEntry{}
-	for i := range files {
-		f := &files[i]
-		if f.Done || f.Action != store.FileActionMove || f.TargetPath == "" || f.Overwrite {
-			f.Conflict = nil
-			continue
-		}
-		destDir := filepath.Dir(f.TargetPath)
-		entries, ok := dirCache[destDir]
-		if !ok {
-			entries = listDestEntries(destDir)
-			dirCache[destDir] = entries
-		}
-		incoming := filepath.Base(f.TargetPath)
-		match := findConflict(incoming, entries)
-		if match == nil {
-			f.Conflict = nil
-			continue
-		}
-		f.Conflict = &store.FileConflict{
-			ExistingName:    match.name,
-			ExistingPath:    filepath.Join(destDir, match.name),
-			ExistingSize:    match.size,
-			ExistingQuality: mediainfo.Parse(match.name).Summary(),
-			IncomingQuality: mediainfo.Parse(incoming).Summary(),
-		}
-	}
-}
-
-// findConflict returns the existing entry that collides with incoming: an exact
-// (case-insensitive) name match wins; otherwise a video file with the same
-// episode marker is considered the same content in a different release.
-func findConflict(incoming string, entries []destEntry) *destEntry {
-	for i := range entries {
-		if strings.EqualFold(entries[i].name, incoming) {
-			return &entries[i]
-		}
-	}
-	ep := mediainfo.Episode(incoming)
-	if ep == "" {
-		return nil
-	}
-	for i := range entries {
-		if !videoExts[strings.ToLower(filepath.Ext(entries[i].name))] {
-			continue
-		}
-		if mediainfo.Episode(entries[i].name) == ep {
-			return &entries[i]
-		}
-	}
-	return nil
-}
-
-// listDestEntries returns the regular files (not sub-directories) of dir.
-func listDestEntries(dir string) []destEntry {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	out := make([]destEntry, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		var size int64
-		if info, err := e.Info(); err == nil {
-			size = info.Size()
-		}
-		out = append(out, destEntry{name: e.Name(), size: size})
-	}
-	return out
-}
-
-// RejectItem marks an item as rejected without moving anything.
-func (e *Engine) RejectItem(ctx context.Context, id int64) error {
-	return e.store.UpdateItemStatus(ctx, id, store.StatusRejected, "")
-}
-
-// ResolveConflict records the user's decision for a colliding move file:
-//   - "replace": delete the existing target file on execution and move the new
-//     one in (the new release wins).
-//   - "keep": keep the existing target file and drop the incoming duplicate by
-//     planning it for deletion from the source.
-//
-// Either way the conflict is cleared so the plan can be applied.
-func (e *Engine) ResolveConflict(ctx context.Context, id int64, relPath, resolution string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
-	}
-	idx := -1
-	for i := range item.Files {
-		if item.Files[i].RelPath == relPath {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return fmt.Errorf("file not found in item")
-	}
-	f := &item.Files[idx]
-	if f.Conflict == nil {
-		return fmt.Errorf("kein Konflikt für diese Datei")
-	}
-	switch resolution {
-	case "replace":
-		f.Action = store.FileActionMove
-		f.Overwrite = true
-		f.OverwritePath = f.Conflict.ExistingPath
-		f.Conflict = nil
-	case "keep":
-		f.Action = store.FileActionDelete
-		f.TargetPath = ""
-		f.Overwrite = false
-		f.OverwritePath = ""
-		f.Conflict = nil
-	default:
-		return fmt.Errorf("invalid resolution")
-	}
-	e.log.Info("conflict resolved", "item", item.Name, "file", relPath, "resolution", resolution)
-	return e.store.UpsertItem(ctx, item)
-}
-
-// SetItemTarget assigns a target library (and optional series sub-folder) to an
-// item and routes every movable file there: files already planned to move get a
-// recomputed destination, and undecided files (e.g. a folder the AI never
-// classified) are switched to "move". Explicit delete/keep choices are kept.
-func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFolder string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
-	}
-	lib, err := e.store.GetLibrary(ctx, libraryID)
-	if err != nil {
-		return fmt.Errorf("library not found")
-	}
-	destDir := lib.Path
-	if subFolder != "" {
-		destDir = filepath.Join(lib.Path, subFolder)
-	}
-	// Keep the destination inside the library: reject a sub-folder that escapes
-	// lib.Path via ".." (filepath.Rel yields a ".." prefix in that case).
-	if rel, relErr := filepath.Rel(lib.Path, destDir); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return fmt.Errorf("ungültiger Zielordner: %s", subFolder)
-	}
-	if info, err := os.Stat(destDir); err != nil || !info.IsDir() {
-		return fmt.Errorf("Zielordner existiert nicht: %s", destDir)
-	}
-	item.TargetLibraryID = &lib.ID
-	item.TargetPath = destDir
-	routeFilesToTarget(item.Files, destDir)
-	e.detectConflicts(item.Files)
-	// Setting a target by hand means the user is taking over a failed or
-	// unresolved classification: clear any error and route it as normal review.
-	if item.Status == store.StatusError {
-		item.Status = store.StatusPendingReview
-	}
-	item.ErrorMessage = ""
-	return e.store.UpsertItem(ctx, item)
-}
-
-// resolveTarget maps a classification result to a concrete library and
-// destination directory. ok is false when the item needs manual review.
-func (e *Engine) resolveTarget(res *ai.Result, libs []store.Library) (lib *store.Library, destDir string, ok bool, reason string) {
-	var chosen *store.Library
-	for i := range libs {
-		if strings.EqualFold(libs[i].Name, res.Library) {
-			chosen = &libs[i]
-			break
-		}
-	}
-	if chosen == nil {
-		return nil, "", false, "no matching target library for AI suggestion"
-	}
-
-	// If the model picked a sub-folder, match it (case-insensitively) against the
-	// library's actual sub-folders so episodes land in the correct show folder.
-	if folder := strings.TrimSpace(res.SeriesFolder); folder != "" {
-		if match := matchSubfolder(chosen.Path, folder); match != "" {
-			return chosen, filepath.Join(chosen.Path, match), true, ""
-		}
-		if chosen.UseSubfolders {
-			return chosen, "", false, "suggested sub-folder does not exist; manual review required"
-		}
-		// Flat libraries (e.g. movies) may still go to the library root.
-		return chosen, chosen.Path, true, ""
-	}
-
-	if chosen.UseSubfolders {
-		return chosen, "", false, "no existing sub-folder matched; manual review required"
-	}
-	return chosen, chosen.Path, true, ""
-}
-
-// matchSubfolder returns the actual sub-folder name of root that equals name
-// case-insensitively, or "" if none matches.
-func matchSubfolder(root, name string) string {
-	for _, sub := range listSubfolders(root) {
-		if strings.EqualFold(sub, name) {
-			return sub
-		}
-	}
-	return ""
-}
-
-// suggestFolder records the AI's proposed destination folder on the item when a
-// library matched but the show folder is missing, so the UI can offer to create
-// it. A nil library or empty name clears any previous suggestion.
-func (e *Engine) suggestFolder(item *store.Item, lib *store.Library, res *ai.Result) {
-	item.SuggestedLibraryID = nil
-	item.SuggestedFolder = ""
-	if lib == nil {
-		return
-	}
-	folder := strings.TrimSpace(res.SeriesFolder)
-	if folder == "" {
-		folder = sanitizeFolder(res.Title)
-	}
-	if folder == "" {
-		return
-	}
-	lid := lib.ID
-	item.SuggestedLibraryID = &lid
-	item.SuggestedFolder = folder
-}
-
-// sanitizeFolder turns an AI title into a safe single-segment folder name.
-func sanitizeFolder(title string) string {
-	t := strings.TrimSpace(title)
-	t = strings.ReplaceAll(t, "/", " ")
-	t = strings.ReplaceAll(t, "\\", " ")
-	t = strings.Trim(t, ". ")
-	return strings.TrimSpace(t)
-}
-
-// CreateTargetFolder creates the AI-suggested destination folder for an item and
-// sets it as the move target, recomputing each move file's destination.
-func (e *Engine) CreateTargetFolder(ctx context.Context, id int64) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
-	}
-	if item.SuggestedLibraryID == nil || item.SuggestedFolder == "" {
-		return fmt.Errorf("kein Ordner zum Anlegen vorgeschlagen")
-	}
-	lib, err := e.store.GetLibrary(ctx, *item.SuggestedLibraryID)
-	if err != nil {
-		return fmt.Errorf("library not found")
-	}
-	return e.applyNewFolder(ctx, item, lib, item.SuggestedFolder)
-}
-
-// CreateNamedTargetFolder creates a new folder named folder directly under the
-// given library and sets it as the item's move target. Used during manual
-// review when the desired destination folder does not exist yet.
-func (e *Engine) CreateNamedTargetFolder(ctx context.Context, id, libraryID int64, folder string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
-	}
-	lib, err := e.store.GetLibrary(ctx, libraryID)
-	if err != nil {
-		return fmt.Errorf("library not found")
-	}
-	return e.applyNewFolder(ctx, item, lib, folder)
-}
-
-// applyNewFolder creates <lib>/<name> (a direct child of the library path), sets
-// it as the item's move target, recomputes file destinations, clears any pending
-// suggestion/error and persists. The caller must hold e.mu.
-func (e *Engine) applyNewFolder(ctx context.Context, item *store.Item, lib store.Library, name string) error {
-	folder := sanitizeFolder(name)
-	if folder == "" {
-		return fmt.Errorf("ungültiger Ordnername")
-	}
-	// If a folder with this name already exists (case-insensitively), reuse it
-	// instead of creating a near-duplicate that differs only in case/spacing.
-	if existing := matchSubfolder(lib.Path, folder); existing != "" {
-		folder = existing
-	}
-	dir := filepath.Join(lib.Path, folder)
-	// Safety: the new folder must be a direct child of the library path and may
-	// not escape it via ".."; filepath.Rel makes the containment explicit.
-	if rel, relErr := filepath.Rel(lib.Path, dir); relErr != nil || rel != folder {
-		return fmt.Errorf("ungültiger Ordnername")
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("Ordner anlegen: %w", err)
-	}
-	lid := lib.ID
-	item.TargetLibraryID = &lid
-	item.TargetPath = dir
-	item.SuggestedLibraryID = nil
-	item.SuggestedFolder = ""
-	routeFilesToTarget(item.Files, dir)
-	e.detectConflicts(item.Files)
-	// Creating a target by hand means the user is taking over a failed or
-	// unresolved classification: clear any error and route it as normal review.
-	if item.Status == store.StatusError {
-		item.Status = store.StatusPendingReview
-	}
-	item.ErrorMessage = ""
-	e.log.Info("created target folder", "dir", dir, "item", item.Name)
-	return e.store.UpsertItem(ctx, item)
-}
-
-// buildRequest constructs the AI classification request, including existing
-// series folders and any user-provided folder descriptions so the model can
-// map to an existing show with extra context.
-func (e *Engine) buildRequest(ctx context.Context, name string, srcFiles []store.File, libs []store.Library, sourcePath, globalContext string) ai.Request {
-	notes, _ := e.store.FolderNotesByPath(ctx)
-
-	files := make([]ai.FileInput, 0, len(srcFiles))
-	for _, f := range srcFiles {
-		if f.RelPath == "" {
-			continue // synthetic empty-folder marker, nothing to classify
-		}
-		files = append(files, ai.FileInput{Path: f.RelPath, SizeBytes: f.Size})
-	}
-	infos := make([]ai.LibraryInfo, 0, len(libs))
-	for _, l := range libs {
-		info := ai.LibraryInfo{Name: l.Name, Kind: l.Kind, Description: notes[l.Path]}
-		// Include the existing sub-folder structure of every library so the model
-		// can map an item into the matching show/collection folder, not just the
-		// library root.
-		for _, name := range listSubfolders(l.Path) {
-			info.ExistingFolders = append(info.ExistingFolders, ai.ExistingFolder{
-				Name:        name,
-				Description: notes[filepath.Join(l.Path, name)],
-			})
-		}
-		infos = append(infos, info)
-	}
-	return ai.Request{
-		Name:          name,
-		Files:         files,
-		GlobalContext: globalContext,
-		SourceContext: notes[sourcePath],
-		Libraries:     infos,
-	}
-}
-
-// listSubfolders returns the immediate sub-directory names of root.
-func listSubfolders(root string) []string {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-			out = append(out, e.Name())
-		}
-	}
-	sort.Strings(out)
-	return out
 }

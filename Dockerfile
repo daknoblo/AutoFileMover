@@ -4,7 +4,7 @@
 # Run the Go compiler on the runner's NATIVE architecture and cross-compile for
 # the requested target platform. CGO is off and modernc SQLite is pure Go, so a
 # cross-compile is trivial and avoids slow QEMU emulation for the arm64 image.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 WORKDIR /src
 
 # Pure-Go build (modernc SQLite) so no C toolchain is required.

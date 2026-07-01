@@ -59,12 +59,12 @@ func TestQualitySummary(t *testing.T) {
 
 func TestEpisode(t *testing.T) {
 	cases := map[string]string{
-		"The.Show.S05E01.1080p.mkv":   "S05E01",
-		"The.Show.s5e1.1080p.mkv":     "S05E01",
-		"The.Show.S05.E02.mkv":        "S05E02",
-		"The Show 1x05 720p.mkv":      "S01E05",
-		"Movie.2019.1080p.mkv":        "",
-		"Show.S10E120.mkv":            "S10E120",
+		"The.Show.S05E01.1080p.mkv": "S05E01",
+		"The.Show.s5e1.1080p.mkv":   "S05E01",
+		"The.Show.S05.E02.mkv":      "S05E02",
+		"The Show 1x05 720p.mkv":    "S01E05",
+		"Movie.2019.1080p.mkv":      "",
+		"Show.S10E120.mkv":          "S10E120",
 	}
 	for name, want := range cases {
 		if got := Episode(name); got != want {
