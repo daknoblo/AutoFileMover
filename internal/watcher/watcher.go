@@ -47,6 +47,7 @@ func (w *Watcher) Run(ctx context.Context, scanInterval time.Duration) error {
 	}
 	w.fsw = fsw
 	defer fsw.Close()
+	defer w.stopTimer()
 
 	w.Resync(ctx)
 	w.engine.ProcessAll(ctx)
@@ -124,4 +125,15 @@ func (w *Watcher) schedule(ctx context.Context) {
 	w.timer = time.AfterFunc(w.debounce, func() {
 		w.engine.ProcessAll(ctx)
 	})
+}
+
+// stopTimer cancels any pending debounced scan. It is called when Run returns
+// so a queued scan cannot fire after the watcher has shut down.
+func (w *Watcher) stopTimer() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.timer != nil {
+		w.timer.Stop()
+		w.timer = nil
+	}
 }

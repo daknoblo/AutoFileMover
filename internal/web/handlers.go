@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -156,17 +158,30 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	// Reject NaN/Inf before the range check: NaN comparisons are always false,
+	// so a NaN threshold would otherwise slip through the "0..1" bounds test.
+	if math.IsNaN(dto.Threshold) || math.IsInf(dto.Threshold, 0) {
+		writeErr(w, http.StatusBadRequest, "threshold must be a real number")
+		return
+	}
 	if dto.Threshold < 0 || dto.Threshold > 1 {
 		writeErr(w, http.StatusBadRequest, "threshold must be between 0 and 1")
 		return
 	}
+	if base := strings.TrimSpace(dto.AIBaseURL); base != "" {
+		u, perr := url.Parse(base)
+		if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			writeErr(w, http.StatusBadRequest, "ai_base_url must be a valid http(s) URL")
+			return
+		}
+	}
 	err := s.store.SaveAppSettings(r.Context(), store.AppSettings{
-		AIBaseURL:    strings.TrimSpace(dto.AIBaseURL),
-		AIModel:      strings.TrimSpace(dto.AIModel),
-		AIAPIVersion: strings.TrimSpace(dto.AIAPIVersion),
-		AIAPIKey:     dto.AIAPIKey, // empty -> keep existing
-		Threshold:    dto.Threshold,
-		AutoMove:     dto.AutoMove,
+		AIBaseURL:      strings.TrimSpace(dto.AIBaseURL),
+		AIModel:        strings.TrimSpace(dto.AIModel),
+		AIAPIVersion:   strings.TrimSpace(dto.AIAPIVersion),
+		AIAPIKey:       dto.AIAPIKey, // empty -> keep existing
+		Threshold:      dto.Threshold,
+		AutoMove:       dto.AutoMove,
 		IgnorePatterns: splitLines(dto.Ignore),
 		AIContext:      strings.TrimSpace(dto.AIContext),
 	})
@@ -705,4 +720,3 @@ func (s *Server) resync() {
 		s.resyncer.Resync(context.Background())
 	}
 }
-

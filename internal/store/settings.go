@@ -79,13 +79,13 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 		aiContext = v
 	}
 	return AppSettings{
-		AIBaseURL:    all[KeyAIBaseURL],
-		AIAPIKey:     all[KeyAIAPIKey],
-		AIModel:      all[KeyAIModel],
-		AIAPIVersion: all[KeyAIAPIVersion],
-		Threshold:    threshold,
-		AutoMove:     autoMove,
-		DryRun:       dryRun,
+		AIBaseURL:      all[KeyAIBaseURL],
+		AIAPIKey:       all[KeyAIAPIKey],
+		AIModel:        all[KeyAIModel],
+		AIAPIVersion:   all[KeyAIAPIVersion],
+		Threshold:      threshold,
+		AutoMove:       autoMove,
+		DryRun:         dryRun,
 		IgnorePatterns: ignore,
 		AIContext:      aiContext,
 	}, nil
@@ -107,7 +107,6 @@ func splitPatterns(s string) []string {
 func (s *Store) SetDryRun(ctx context.Context, enabled bool) error {
 	return s.SetSetting(ctx, KeyDryRun, strconv.FormatBool(enabled))
 }
-
 
 // SaveAppSettings persists the typed application settings. An empty API key is
 // ignored so that the secret is not overwritten when the UI does not resend it.

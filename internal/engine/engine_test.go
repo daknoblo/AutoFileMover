@@ -19,10 +19,10 @@ import (
 
 func TestApplyDecisions(t *testing.T) {
 	files := []store.File{
-		{RelPath: "Show.S01E01.mkv"},           // exact path match
-		{RelPath: "subdir/Show.S01E01.nfo"},    // matched by base name only
-		{RelPath: "Show.S01E01.sample.mkv"},    // delete
-		{RelPath: "unmatched.txt"},             // no decision -> keep
+		{RelPath: "Show.S01E01.mkv"},        // exact path match
+		{RelPath: "subdir/Show.S01E01.nfo"}, // matched by base name only
+		{RelPath: "Show.S01E01.sample.mkv"}, // delete
+		{RelPath: "unmatched.txt"},          // no decision -> keep
 	}
 	decisions := []ai.FileDecision{
 		{Path: "Show.S01E01.mkv", Action: "move", Confidence: 0.97},
@@ -381,7 +381,11 @@ func TestProcessCandidateSkipsErrorItem(t *testing.T) {
 		Name:  "Broken.Item",
 		Files: []store.File{{RelPath: "movie.mkv", Size: 1000}},
 	}
-	if err := eng.processCandidate(ctx, cand, filepath.Dir(srcDir)); err != nil {
+	sc, err := eng.newScanContext(ctx)
+	if err != nil {
+		t.Fatalf("newScanContext: %v", err)
+	}
+	if err := eng.processCandidate(ctx, sc, cand, filepath.Dir(srcDir)); err != nil {
 		t.Fatalf("processCandidate: %v", err)
 	}
 	if n := atomic.LoadInt32(&hits); n != 0 {
@@ -390,6 +394,42 @@ func TestProcessCandidateSkipsErrorItem(t *testing.T) {
 	got, _ := st.GetItem(ctx, item.ID)
 	if got == nil || got.Status != store.StatusError {
 		t.Errorf("error item should be left untouched, got %+v", got)
+	}
+}
+
+// TestProcessAllCreatesPendingItem exercises the whole scan pipeline
+// (ProcessAll -> newScanContext -> per-candidate processing -> store). With no
+// AI endpoint configured the detected item is queued for manual review.
+func TestProcessAllCreatesPendingItem(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	src := filepath.Join(dir, "src")
+	itemDir := filepath.Join(src, "Movie.2020")
+	if err := os.MkdirAll(itemDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(itemDir, "movie.mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddSource(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.ProcessAll(ctx)
+
+	items, err := st.ListItems(ctx, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("want 1 item after scan, got %d", len(items))
+	}
+	if items[0].Status != store.StatusPendingReview {
+		t.Errorf("with no AI configured the item should be pending_review, got %q", items[0].Status)
+	}
+	if items[0].Name != "Movie.2020" {
+		t.Errorf("unexpected item name %q", items[0].Name)
 	}
 }
 
