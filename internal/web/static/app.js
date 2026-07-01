@@ -10,6 +10,9 @@ const expandedItems = new Set();
 // Items where the user explicitly opened the manual target picker even though
 // the AI already resolved a destination (override). Survives re-renders.
 const manualTargetItems = new Set();
+// While a manual target picker is open, the periodic background reload is paused
+// so it never wipes the user's in-progress dropdown selection or typed input.
+function pickerOpen() { return manualTargetItems.size > 0; }
 
 function fmtSize(n) {
 	if (!n) return "";
@@ -626,7 +629,7 @@ async function loadStatus() {
 			curEl.textContent = "";
 			bar.hidden = true;
 			meta.textContent = "";
-			if (scanWasActive) { scanWasActive = false; loadItems(); }
+			if (scanWasActive && !pickerOpen()) { scanWasActive = false; loadItems(); }
 		}
 		// Filesystem-operations health label.
 		const fsLabel = document.getElementById("fsLabel");
@@ -736,7 +739,7 @@ async function init() {
 	} catch (e) {
 		toast(e.message, true);
 	}
-	setInterval(loadItems, 10000);
+	setInterval(() => { if (!pickerOpen()) loadItems(); }, 10000);
 	setInterval(loadStatus, 1500);
 }
 
