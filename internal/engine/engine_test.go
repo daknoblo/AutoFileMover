@@ -643,3 +643,38 @@ func TestCreateNamedTargetFolderReusesExisting(t *testing.T) {
 		t.Errorf("expected exactly one folder in the library, got %v", names)
 	}
 }
+
+func TestResolveTargetUsesSubfolderFlag(t *testing.T) {
+	root := t.TempDir()
+	flatDir := filepath.Join(root, "Filme")
+	if err := os.MkdirAll(flatDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subDir := filepath.Join(root, "Serien")
+	if err := os.MkdirAll(filepath.Join(subDir, "The Show"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	libs := []store.Library{
+		{ID: 1, Name: "Filme", Kind: store.KindMovie, Path: flatDir, UseSubfolders: false},
+		{ID: 2, Name: "Serien", Kind: store.KindSeries, Path: subDir, UseSubfolders: true},
+	}
+	e := &Engine{}
+
+	// Flat library (no sub-folders): resolves straight to the library root.
+	if _, dest, ok, _ := e.resolveTarget(&ai.Result{Library: "Filme"}, libs); !ok || dest != flatDir {
+		t.Errorf("flat library should resolve to its root: dest=%q ok=%v", dest, ok)
+	}
+	// Sub-folder library, no matching folder: needs manual review.
+	if _, _, ok, _ := e.resolveTarget(&ai.Result{Library: "Serien", SeriesFolder: "Nope"}, libs); ok {
+		t.Error("sub-folder library without a matching folder should need review")
+	}
+	// Sub-folder library, matching folder (case-insensitive): resolved.
+	if _, dest, ok, _ := e.resolveTarget(&ai.Result{Library: "Serien", SeriesFolder: "the show"}, libs); !ok || dest != filepath.Join(subDir, "The Show") {
+		t.Errorf("sub-folder library should resolve to the matched folder: dest=%q ok=%v", dest, ok)
+	}
+	// The flag overrides kind: a movie library set to use sub-folders needs one.
+	libs[0].UseSubfolders = true
+	if _, _, ok, _ := e.resolveTarget(&ai.Result{Library: "Filme"}, libs); ok {
+		t.Error("library flipped to use sub-folders should need review when none match")
+	}
+}
