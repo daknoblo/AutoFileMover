@@ -171,6 +171,8 @@ textarea {
 /* Folder list items with editable description */
 .list li.folder-item { flex-direction: column; align-items: stretch; gap: 8px; }
 .folder-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.lib-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.lib-check input { width: auto; }
 .desc-row { display: flex; gap: 8px; }
 .desc-row .folder-desc { flex: 1; min-width: 120px; }
 

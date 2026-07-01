@@ -50,6 +50,9 @@ type Library struct {
 	Name      string    `json:"name"`
 	Kind      string    `json:"kind"`
 	Path      string    `json:"path"`
+	// UseSubfolders routes items into a per-title sub-folder of the library
+	// (series/documentaries) rather than straight into the library root (movies).
+	UseSubfolders bool  `json:"use_subfolders"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -171,6 +174,7 @@ CREATE TABLE IF NOT EXISTS libraries (
 	name       TEXT NOT NULL,
 	kind       TEXT NOT NULL,
 	path       TEXT NOT NULL UNIQUE,
+	use_subfolders INTEGER NOT NULL DEFAULT 1,
 	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS items (
@@ -211,6 +215,15 @@ CREATE TABLE IF NOT EXISTS folder_notes (
 		if _, aerr := s.db.Exec(stmt); aerr != nil && !strings.Contains(aerr.Error(), "duplicate column name") {
 			return fmt.Errorf("migrate alter: %w", aerr)
 		}
+	}
+	// libraries.use_subfolders controls whether items are routed into per-title
+	// sub-folders. On first add, default existing rows by kind (movies flat).
+	if _, aerr := s.db.Exec(`ALTER TABLE libraries ADD COLUMN use_subfolders INTEGER NOT NULL DEFAULT 1`); aerr != nil {
+		if !strings.Contains(aerr.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate alter: %w", aerr)
+		}
+	} else if _, uerr := s.db.Exec(`UPDATE libraries SET use_subfolders = 0 WHERE kind = ?`, KindMovie); uerr != nil {
+		return fmt.Errorf("migrate default: %w", uerr)
 	}
 	return nil
 }
@@ -296,7 +309,7 @@ func (s *Store) DeleteSource(ctx context.Context, id int64) error {
 
 // ListLibraries returns all configured target libraries.
 func (s *Store) ListLibraries(ctx context.Context) ([]Library, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, kind, path, created_at FROM libraries ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, kind, path, use_subfolders, created_at FROM libraries ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +317,7 @@ func (s *Store) ListLibraries(ctx context.Context) ([]Library, error) {
 	var out []Library
 	for rows.Next() {
 		var l Library
-		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.Path, &l.CreatedAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.Path, &l.UseSubfolders, &l.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
@@ -316,19 +329,28 @@ func (s *Store) ListLibraries(ctx context.Context) ([]Library, error) {
 func (s *Store) GetLibrary(ctx context.Context, id int64) (Library, error) {
 	var l Library
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, kind, path, created_at FROM libraries WHERE id = ?`, id).
-		Scan(&l.ID, &l.Name, &l.Kind, &l.Path, &l.CreatedAt)
+		`SELECT id, name, kind, path, use_subfolders, created_at FROM libraries WHERE id = ?`, id).
+		Scan(&l.ID, &l.Name, &l.Kind, &l.Path, &l.UseSubfolders, &l.CreatedAt)
 	return l, err
 }
 
-// AddLibrary inserts a new target library.
+// AddLibrary inserts a new target library. use_subfolders defaults by kind
+// (movies flat, series/documentaries use per-title sub-folders) and can be
+// changed later with SetLibraryUseSubfolders.
 func (s *Store) AddLibrary(ctx context.Context, name, kind, path string) (Library, error) {
-	res, err := s.db.ExecContext(ctx, `INSERT INTO libraries(name, kind, path) VALUES(?, ?, ?)`, name, kind, path)
+	useSub := kind != KindMovie
+	res, err := s.db.ExecContext(ctx, `INSERT INTO libraries(name, kind, path, use_subfolders) VALUES(?, ?, ?, ?)`, name, kind, path, useSub)
 	if err != nil {
 		return Library{}, err
 	}
 	id, _ := res.LastInsertId()
-	return Library{ID: id, Name: name, Kind: kind, Path: path, CreatedAt: time.Now()}, nil
+	return Library{ID: id, Name: name, Kind: kind, Path: path, UseSubfolders: useSub, CreatedAt: time.Now()}, nil
+}
+
+// SetLibraryUseSubfolders updates a library's per-title sub-folder routing flag.
+func (s *Store) SetLibraryUseSubfolders(ctx context.Context, id int64, use bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE libraries SET use_subfolders = ? WHERE id = ?`, use, id)
+	return err
 }
 
 // DeleteLibrary removes a library by id.

@@ -300,8 +300,9 @@ function reviewCard(item) {
 			} catch (e) { toast(e.message, true); }
 		};
 		// Movies land in the library root; series/documentary libraries use per-title
-		// sub-folders, so offer their existing folders for selection.
-		const isFlat = (lib) => !!lib && lib.kind === "movie";
+		// sub-folders, so offer their existing folders for selection. The per-library
+		// use_subfolders flag controls this (overridable in library settings).
+		const isFlat = (lib) => !!lib && !lib.use_subfolders;
 		const loadSub = async (lib) => {
 			subSelect.innerHTML = "";
 			if (!lib || isFlat(lib)) { subSelect.style.display = "none"; return; }
@@ -446,11 +447,20 @@ async function loadLibraries() {
 				toast(e.message, true);
 			}
 		});
+		const subChk = el("input", { type: "checkbox" });
+		subChk.checked = !!l.use_subfolders;
+		subChk.addEventListener("change", async () => {
+			try {
+				await api("PUT", `/libraries/${l.id}`, { use_subfolders: subChk.checked });
+				l.use_subfolders = subChk.checked;
+			} catch (e) { toast(e.message, true); subChk.checked = !subChk.checked; }
+		});
 		list.appendChild(el("li", { class: "folder-item" }, [
 			el("div", { class: "folder-head" }, [
 				el("span", {}, [el("strong", { text: l.name }), el("span", { class: "meta", text: ` ${l.kind} · ${l.path}` })]),
 				del,
 			]),
+			el("label", { class: "lib-check" }, [subChk, el("span", { text: t("lib_use_subfolders") })]),
 			descRow(l.path),
 		]));
 	});
@@ -660,6 +670,7 @@ async function openPicker(mode) {
 	document.getElementById("pickerDesc").value = "";
 	document.getElementById("libName").value = "";
 	document.getElementById("libKind").value = "movie";
+	document.getElementById("libUseSubfolders").checked = false; // movie default: library root
 	document.getElementById("pickerModal").hidden = false;
 	await pickerLoad("");
 }
@@ -667,6 +678,11 @@ async function openPicker(mode) {
 function closePicker() {
 	document.getElementById("pickerModal").hidden = true;
 }
+
+// Default the sub-folder checkbox from the chosen kind (movies land in the root).
+document.getElementById("libKind").addEventListener("change", (e) => {
+	document.getElementById("libUseSubfolders").checked = e.target.value !== "movie";
+});
 
 async function pickerLoad(path) {
 	const q = path ? "?path=" + encodeURIComponent(path) : "";
@@ -706,8 +722,9 @@ document.getElementById("pickerConfirm").addEventListener("click", async () => {
 		} else {
 			const name = document.getElementById("libName").value.trim();
 			const kind = document.getElementById("libKind").value;
+			const useSubfolders = document.getElementById("libUseSubfolders").checked;
 			if (!name) return toast(t("need_name"), true);
-			await api("POST", "/libraries", { name, kind, path });
+			await api("POST", "/libraries", { name, kind, path, use_subfolders: useSubfolders });
 			if (desc) await api("PUT", "/folder-notes", { path, description: desc });
 			await loadLibraries();
 			toast(t("lib_created"));

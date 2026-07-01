@@ -46,10 +46,16 @@ erfolgt nur explizit über „KI-Abgleich“.
 
 ### Regeln für die Zuordnung
 
-- **Film / Dokumentation** → Element wird in den Bibliotheksordner verschoben.
-- **Serie** → Es wird **nur in einen bereits existierenden Serienordner**
-  einsortiert. Findet die KI keinen passenden, wandert das Element in die
-  Review-Queue (so gewünscht konfiguriert).
+Pro Bibliothek steuert die Checkbox **„Unterordner pro Titel verwenden"**, wie
+einsortiert wird (in den Einstellungen jederzeit umschaltbar; Standard: aus für
+Filme, an für Serien/Dokus):
+
+- **Unterordner aus** (typisch Filme) → das Element landet direkt im
+  Bibliotheks-Wurzelordner.
+- **Unterordner an** (typisch Serien/Dokus) → das Element wird **nur in einen
+  bereits existierenden Unterordner** einsortiert. Findet die KI keinen
+  passenden, wandert es in die Review-Queue, wo sich der Ordner manuell wählen
+  oder neu anlegen lässt.
 - Dateien werden **verschoben** (move), bei unterschiedlichen Dateisystemen
   automatisch per copy + delete (Cross-Device-Fallback).
 

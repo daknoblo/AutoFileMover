@@ -951,15 +951,15 @@ func (e *Engine) resolveTarget(res *ai.Result, libs []store.Library) (lib *store
 		if match := matchSubfolder(chosen.Path, folder); match != "" {
 			return chosen, filepath.Join(chosen.Path, match), true, ""
 		}
-		if chosen.Kind == store.KindSeries {
-			return chosen, "", false, "suggested series folder does not exist; manual review required"
+		if chosen.UseSubfolders {
+			return chosen, "", false, "suggested sub-folder does not exist; manual review required"
 		}
-		// Movies/documentaries may still go to the library root.
+		// Flat libraries (e.g. movies) may still go to the library root.
 		return chosen, chosen.Path, true, ""
 	}
 
-	if chosen.Kind == store.KindSeries {
-		return chosen, "", false, "no existing series folder matched; manual review required"
+	if chosen.UseSubfolders {
+		return chosen, "", false, "no existing sub-folder matched; manual review required"
 	}
 	return chosen, chosen.Path, true, ""
 }

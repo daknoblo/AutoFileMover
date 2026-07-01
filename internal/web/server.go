@@ -63,6 +63,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/libraries", s.handleListLibraries)
 	mux.HandleFunc("POST /api/libraries", s.handleCreateLibrary)
+	mux.HandleFunc("PUT /api/libraries/{id}", s.handleUpdateLibrary)
 	mux.HandleFunc("DELETE /api/libraries/{id}", s.handleDeleteLibrary)
 	mux.HandleFunc("GET /api/libraries/{id}/folders", s.handleLibraryFolders)
 

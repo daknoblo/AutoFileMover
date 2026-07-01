@@ -237,9 +237,10 @@ func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
-		Kind string `json:"kind"`
-		Path string `json:"path"`
+		Name          string `json:"name"`
+		Kind          string `json:"kind"`
+		Path          string `json:"path"`
+		UseSubfolders *bool  `json:"use_subfolders"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
@@ -267,7 +268,40 @@ func (s *Server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
+	// The create form may override the kind-based sub-folder default.
+	if body.UseSubfolders != nil && *body.UseSubfolders != lib.UseSubfolders {
+		if err := s.store.SetLibraryUseSubfolders(r.Context(), lib.ID, *body.UseSubfolders); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		lib.UseSubfolders = *body.UseSubfolders
+	}
 	writeJSON(w, http.StatusCreated, lib)
+}
+
+// handleUpdateLibrary updates a library's per-title sub-folder routing flag.
+func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var body struct {
+		UseSubfolders *bool `json:"use_subfolders"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if body.UseSubfolders == nil {
+		writeErr(w, http.StatusBadRequest, "use_subfolders is required")
+		return
+	}
+	if err := s.store.SetLibraryUseSubfolders(r.Context(), id, *body.UseSubfolders); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"use_subfolders": *body.UseSubfolders})
 }
 
 func (s *Server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
