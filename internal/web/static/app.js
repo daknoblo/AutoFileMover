@@ -303,13 +303,23 @@ function reviewCard(item) {
 		// sub-folders, so offer their existing folders for selection. The per-library
 		// use_subfolders flag controls this (overridable in library settings).
 		const isFlat = (lib) => !!lib && !lib.use_subfolders;
-		const loadSub = async (lib) => {
+		// subOf derives the sub-folder the item's target already points at (relative
+		// to the library), so the dropdown can reflect it after a refresh.
+		const subOf = (lib) => {
+			if (!lib || !item.target_path) return "";
+			const prefix = lib.path + "/";
+			return item.target_path.startsWith(prefix) ? item.target_path.slice(prefix.length) : "";
+		};
+		const loadSub = async (lib, selected) => {
 			subSelect.innerHTML = "";
 			if (!lib || isFlat(lib)) { subSelect.style.display = "none"; return; }
 			subSelect.style.display = "";
 			subSelect.appendChild(el("option", { value: "", text: t("choose_folder") }));
 			const folders = await api("GET", `/libraries/${lib.id}/folders`).catch(() => []);
 			folders.forEach((f) => subSelect.appendChild(el("option", { value: f, text: f })));
+			// Reflect the already-chosen folder so the dropdown stays consistent with
+			// the applied target path.
+			if (selected && [...subSelect.options].some((o) => o.value === selected)) subSelect.value = selected;
 		};
 		libSelect.addEventListener("change", async () => {
 			const lib = libraries.find((l) => String(l.id) === libSelect.value);
@@ -320,12 +330,13 @@ function reviewCard(item) {
 		});
 		// Picking an existing series folder applies the target immediately too.
 		subSelect.addEventListener("change", () => { if (subSelect.value) applyTarget(subSelect.value); });
-		// Pre-select the current/suggested library and load its folders WITHOUT
-		// applying, so merely rendering the card never sets a target.
+		// Pre-select the current/suggested library, load its folders and reflect the
+		// sub-folder the item already targets — WITHOUT applying (rendering never sets).
 		const preLib = item.target_library_id || item.suggested_library_id;
 		if (preLib && libraries.some((l) => l.id === preLib)) {
+			const lib = libraries.find((l) => l.id === preLib);
 			libSelect.value = String(preLib);
-			loadSub(libraries.find((l) => l.id === preLib));
+			loadSub(lib, subOf(lib));
 		}
 		children.push(el("div", { class: "card-actions" }, [
 			el("span", { class: "picker-label", text: t("manual_target_label") }),
