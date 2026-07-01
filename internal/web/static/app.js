@@ -82,7 +82,12 @@ document.getElementById("brandHome").addEventListener("click", () => {
 // ---- Items ----
 async function loadItems() {
 	const items = await api("GET", "/items");
-	const review = items.filter((i) => i.status === "pending_review" || i.status === "error");
+	// Keep a stable order in the review queue: sort by source path so editing an
+	// item (which bumps its updated_at) never makes the card jump to the top, and
+	// items from the same root folder stay grouped together.
+	const review = items
+		.filter((i) => i.status === "pending_review" || i.status === "error")
+		.sort((a, b) => (a.source_path || "").localeCompare(b.source_path || ""));
 	const history = items.filter((i) => !["pending_review", "error"].includes(i.status));
 
 	document.getElementById("reviewCount").textContent = review.length || "";
@@ -294,22 +299,23 @@ function reviewCard(item) {
 				toast(t("target_set")); refreshAll();
 			} catch (e) { toast(e.message, true); }
 		};
-		// Load a series library's existing sub-folders into the second dropdown.
+		// Movies land in the library root; series/documentary libraries use per-title
+		// sub-folders, so offer their existing folders for selection.
+		const isFlat = (lib) => !!lib && lib.kind === "movie";
 		const loadSub = async (lib) => {
 			subSelect.innerHTML = "";
-			subSelect.style.display = lib && lib.kind === "series" ? "" : "none";
-			if (lib && lib.kind === "series") {
-				const folders = await api("GET", `/libraries/${lib.id}/folders`).catch(() => []);
-				subSelect.appendChild(el("option", { value: "", text: t("choose_series") }));
-				folders.forEach((f) => subSelect.appendChild(el("option", { value: f, text: f })));
-			}
+			if (!lib || isFlat(lib)) { subSelect.style.display = "none"; return; }
+			subSelect.style.display = "";
+			subSelect.appendChild(el("option", { value: "", text: t("choose_folder") }));
+			const folders = await api("GET", `/libraries/${lib.id}/folders`).catch(() => []);
+			folders.forEach((f) => subSelect.appendChild(el("option", { value: f, text: f })));
 		};
 		libSelect.addEventListener("change", async () => {
 			const lib = libraries.find((l) => String(l.id) === libSelect.value);
 			await loadSub(lib);
-			// A non-series library has no sub-folder to choose, so selecting it sets
-			// the target (library root) immediately — no extra button click.
-			if (lib && lib.kind !== "series") applyTarget("");
+			// A flat (movie) library has no sub-folder to choose, so selecting it
+			// targets the library root immediately — no extra click.
+			if (isFlat(lib)) applyTarget("");
 		});
 		// Picking an existing series folder applies the target immediately too.
 		subSelect.addEventListener("change", () => { if (subSelect.value) applyTarget(subSelect.value); });
