@@ -12,3 +12,16 @@ data/
 # OS / editor
 .DS_Store
 *.log
+# Dev media / local env
+devmedia/
+.env
+.env.*
+!.env.example
+# Scan outputs
+*.sarif
+results.json
+gosec*
+# Editor
+.idea/
+.vscode/
+node_modules/

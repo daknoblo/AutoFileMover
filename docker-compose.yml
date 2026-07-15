@@ -1,8 +1,8 @@
 services:
   autofilemover:
     # Published image from GitHub Container Registry (GHCR).
-    # Tags: latest (= main branch), main, vX.Y.Z (releases), sha-<commit>.
-    image: ghcr.io/daknoblo/autofilemover:latest
+    # Tags: stable (= main branch), dev (= develop), vX.Y.Z (Releases), sha-<commit>.
+    image: ghcr.io/daknoblo/autofilemover:stable
     container_name: autofilemover
     restart: unless-stopped
     ports:

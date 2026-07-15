@@ -17,7 +17,7 @@ recommended way to run it is Docker Compose.
 ```yaml
 services:
   autofilemover:
-    image: ghcr.io/daknoblo/autofilemover:latest
+    image: ghcr.io/daknoblo/autofilemover:stable
     container_name: autofilemover
     restart: unless-stopped
     ports:

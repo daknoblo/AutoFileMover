@@ -1,10 +1,30 @@
-# Build artifacts and local files that should not be sent to the Docker build context.
+# Build-Kontext klein halten und lokale/private Daten ausschließen.
 .git
 .github
 .devcontainer
 *.md
+docs/
+deploy/
+
+# Lokale Daten / SQLite / Medien-Testdaten.
 data/
+devmedia/
 *.db
 *.db-wal
 *.db-shm
+
+# Build-Artefakte und Scan-Ausgaben.
+/autofilemover
+/bin/
+/out/
+*.sarif
+results.json
+gosec*
+
+# OS / Editor / lokale Env.
 .DS_Store
+.idea/
+.vscode/
+.env
+.env.*
+node_modules/

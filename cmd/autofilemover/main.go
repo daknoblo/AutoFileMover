@@ -12,8 +12,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/daknoblo/AutoFileMover/internal/config"
 	"github.com/daknoblo/AutoFileMover/internal/engine"
@@ -48,7 +50,11 @@ func main() {
 		log.Error("open store", "err", err)
 		os.Exit(1)
 	}
-	defer st.Close()
+	defer func() {
+		if err := st.Close(); err != nil {
+			log.Error("close store", "err", err)
+		}
+	}()
 
 	// Apply persisted log level if set.
 	if lvl, e := st.GetSetting(context.Background(), "log_level", ""); e == nil && lvl != "" {
@@ -96,20 +102,13 @@ func main() {
 	}
 }
 
-// healthcheck performs a local request to /api/health and returns a process
+// healthcheck performs a local request to /healthz and returns a process
 // exit code. It is used as the container HEALTHCHECK (the distroless image has
 // no shell or curl).
 func healthcheck() int {
-	addr := os.Getenv("AFM_HTTP_ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil || port == "" {
-		port = "8080"
-	}
+	port := healthcheckPort(os.Getenv("AFM_HTTP_ADDR"))
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("http://127.0.0.1:" + port + "/api/health")
+	resp, err := client.Get("http://127.0.0.1:" + port + "/healthz")
 	if err != nil {
 		return 1
 	}
@@ -118,4 +117,26 @@ func healthcheck() int {
 		return 1
 	}
 	return 0
+}
+
+func healthcheckPort(addr string) string {
+	if addr == "" {
+		return "8080"
+	}
+	if _, port, err := net.SplitHostPort(addr); err == nil && port != "" {
+		return port
+	}
+	if strings.HasPrefix(addr, ":") {
+		if port := strings.TrimPrefix(addr, ":"); port != "" {
+			return port
+		}
+		return "8080"
+	}
+	if !strings.Contains(addr, ":") {
+		return addr
+	}
+	if port := addr[strings.LastIndex(addr, ":")+1:]; port != "" {
+		return port
+	}
+	return "8080"
 }

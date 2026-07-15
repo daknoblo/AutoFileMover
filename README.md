@@ -191,11 +191,14 @@ go test ./...
 
 ## Container-Image (GitHub Action)
 
-`.github/workflows/docker-build.yml` baut das Image bei jedem Push auf `main`
-und bei Tags `v*` und veröffentlicht es nach **GHCR**
-(`ghcr.io/<owner>/<repo>`) für `linux/amd64` und `linux/arm64`.
+`.github/workflows/ci.yml` prüft Vet, Lint, Tests und statische Builds.
+`.github/workflows/release.yml` baut und veröffentlicht das Container-Image nach
+**GHCR** (`ghcr.io/<owner>/<repo>`) für `linux/amd64` und `linux/arm64`,
+erzeugt SBOM/Provenance, signiert keyless mit cosign und lädt den Trivy-Scan
+als SARIF hoch.
 
-- Branch-Builds: Tag `main`
+- `main`: Tag `stable`
+- `develop`: Tag `dev`
 - Releases: per Git-Tag `vX.Y.Z` (semver-Tags werden erzeugt)
 
 ## Projektstruktur

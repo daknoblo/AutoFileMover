@@ -4,7 +4,7 @@
 # Run the Go compiler on the runner's NATIVE architecture and cross-compile for
 # the requested target platform. CGO is off and modernc SQLite is pure Go, so a
 # cross-compile is trivial and avoids slow QEMU emulation for the arm64 image.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 WORKDIR /src
 
 # Pure-Go build (modernc SQLite) so no C toolchain is required.
@@ -29,11 +29,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -X github.com/daknoblo/AutoFileMover/internal/version.Commit=${COMMIT} \
       -X github.com/daknoblo/AutoFileMover/internal/version.Date=${DATE}" \
     -o /out/autofilemover ./cmd/autofilemover
+RUN mkdir -p /out/data
 
 # ---- Runtime stage ----
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /
 COPY --from=build /out/autofilemover /autofilemover
+COPY --from=build --chown=65532:65532 /out/data /data
 
 # Data volume holds the SQLite database; media is bind-mounted at runtime.
 ENV AFM_HTTP_ADDR=:8080 \
@@ -46,4 +48,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/autofilemover", "-healthcheck"]
 
+USER nonroot:nonroot
 ENTRYPOINT ["/autofilemover"]

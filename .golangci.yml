@@ -1,25 +1,17 @@
+version: "2"
 run:
   timeout: 5m
-
 linters:
+  default: standard
+  enable:
+    - misspell
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+formatters:
   enable:
     - gofmt
-    - goimports
-    - govet
-    - ineffassign
-    - misspell
-    - revive
-    - staticcheck
-    - unconvert
-    - unused
-
-issues:
-  exclude-use-default: true
-  max-issues-per-linter: 0
-  max-same-issues: 0
-  exclude-rules:
-    # HTTP handler signatures must keep the *http.Request parameter even when it
-    # is unused; renaming it to _ hurts readability.
-    - linters:
-        - revive
-      text: "unused-parameter"
