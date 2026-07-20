@@ -7,7 +7,7 @@ services:
       - "8080:8080"
     environment:
       AFM_HTTP_ADDR: ":8080"
-      AFM_DB_PATH: "/data/autofilemover.db"
+      AFM_DB_PATH: "/appdata/autofilemover.db"
       AFM_MEDIA_ROOT: "/dataroot"
       # Wie lange ein Download unverändert bleiben muss, bevor er verarbeitet wird.
       AFM_STABILITY_WINDOW: "30s"
@@ -20,7 +20,7 @@ services:
     # user: "1000:1000"
     volumes:
       # Persistente SQLite-Datenbank.
-      - autofilemover-data:/data
+      - autofilemover-data:/appdata
       # Medienwurzel mit Downloads und Zielbibliotheken; Pfade in der UI liegen
       # innerhalb von AFM_MEDIA_ROOT (/dataroot).
       - /data/mounts/storage-box/media/:/dataroot

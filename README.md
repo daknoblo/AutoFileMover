@@ -144,7 +144,7 @@ angezeigt, nie zurückgegeben.
 | Variable                | Standard                      | Beschreibung                                         |
 | ----------------------- | ----------------------------- | ---------------------------------------------------- |
 | `AFM_HTTP_ADDR`         | `:8080`                       | Listen-Adresse des Webservers                        |
-| `AFM_DB_PATH`           | `/data/autofilemover.db`      | Pfad der SQLite-Datenbank                            |
+| `AFM_DB_PATH`           | `/appdata/autofilemover.db`      | Pfad der SQLite-Datenbank                            |
 | `AFM_MEDIA_ROOT`        | `/dataroot`                   | Wurzel des gemounteten Medienverzeichnisses          |
 | `AFM_STABILITY_WINDOW`  | `30s`                         | Ruhezeit, bevor ein Download verarbeitet wird        |
 | `AFM_SCAN_INTERVAL`     | `5m`                          | Fallback-Intervall für periodische Scans             |

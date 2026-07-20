@@ -46,7 +46,7 @@ Shutdown. Nicht öffentlich wiederverwendbarer Code gehört unter `internal/`.
 - `go.mod`/`go.sum` vor dem restlichen Quellcode kopieren und `go mod download`
   separat ausführen, damit der Docker-Build-Cache greift.
 - Der Container läuft als `nonroot:nonroot`; keine Shell, kein Paketmanager.
-- Persistenz liegt unter `/data`, Medien werden unter `/dataroot` gemountet.
+- Persistenz liegt unter `/appdata`, Medien werden unter `/dataroot` gemountet.
 - Das Binary implementiert `-healthcheck`; Docker nutzt Exec-Form:
   `CMD ["/autofilemover", "-healthcheck"]`.
 - `/healthz` liefert HTTP 200 mit Body `ok`.
@@ -77,7 +77,7 @@ Shutdown. Nicht öffentlich wiederverwendbarer Code gehört unter `internal/`.
 ## 6. Sicherheit
 
 - Minimale Angriffsfläche: distroless, non-root, statisches Binary.
-- Read-only Root-Filesystem in Compose anstreben; nur `/data` und der
+- Read-only Root-Filesystem in Compose anstreben; nur `/appdata` und der
   Medien-Mount sind beschreibbar.
 - Keine Secrets oder API-Keys committen. API-Keys werden nicht in der UI
   zurückgegeben; sensible Persistenz muss verschlüsselt erfolgen, falls sie
@@ -92,7 +92,7 @@ Shutdown. Nicht öffentlich wiederverwendbarer Code gehört unter `internal/`.
 Konfiguration erfolgt über Env-Variablen mit Präfix `AFM_`:
 
 - `AFM_HTTP_ADDR` (Default `:8080`) — Listen-Adresse.
-- `AFM_DB_PATH` (Default `/data/autofilemover.db`) — SQLite-Datenbank.
+- `AFM_DB_PATH` (Default `/appdata/autofilemover.db`) — SQLite-Datenbank.
 - `AFM_MEDIA_ROOT` (Default `/dataroot`) — Medienwurzel.
 - `AFM_STABILITY_WINDOW` (Default `30s`) — Ruhezeit vor Verarbeitung.
 - `AFM_SCAN_INTERVAL` (Default `5m`) — Fallback-Scan-Intervall.

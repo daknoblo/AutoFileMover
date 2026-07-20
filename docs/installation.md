@@ -25,7 +25,7 @@ services:
     # Match your media owner so moved files keep correct permissions.
     # user: "1000:1000"
     volumes:
-      - ./data:/data                       # SQLite database (persisted)
+      - ./appdata:/appdata                 # SQLite database (persisted)
       - /path/to/media:/dataroot           # download + library root
 ```
 

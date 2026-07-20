@@ -18,7 +18,7 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.HTTPAddr != ":8080" {
 		t.Errorf("HTTPAddr default = %q", cfg.HTTPAddr)
 	}
-	if cfg.DBPath != "/data/autofilemover.db" {
+	if cfg.DBPath != "/appdata/autofilemover.db" {
 		t.Errorf("DBPath default = %q", cfg.DBPath)
 	}
 	if cfg.MediaRoot != "/dataroot" {

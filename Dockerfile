@@ -29,19 +29,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -X github.com/daknoblo/AutoFileMover/internal/version.Commit=${COMMIT} \
       -X github.com/daknoblo/AutoFileMover/internal/version.Date=${DATE}" \
     -o /out/autofilemover ./cmd/autofilemover
-RUN mkdir -p /out/data
+RUN mkdir -p /out/appdata
 
 # ---- Runtime stage ----
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /
 COPY --from=build /out/autofilemover /autofilemover
-COPY --from=build --chown=65532:65532 /out/data /data
+COPY --from=build --chown=65532:65532 /out/appdata /appdata
 
 # Data volume holds the SQLite database; media is bind-mounted at runtime.
 ENV AFM_HTTP_ADDR=:8080 \
-    AFM_DB_PATH=/data/autofilemover.db \
+    AFM_DB_PATH=/appdata/autofilemover.db \
     AFM_MEDIA_ROOT=/dataroot
-VOLUME ["/data"]
+VOLUME ["/appdata"]
 EXPOSE 8080
 
 # The binary implements its own healthcheck (distroless has no curl/wget).

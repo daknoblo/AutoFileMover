@@ -9,7 +9,7 @@ and stored in the SQLite database.
 | Variable               | Default                    | Description                                   |
 | ---------------------- | -------------------------- | --------------------------------------------- |
 | `AFM_HTTP_ADDR`        | `:8080`                    | Listen address of the web server.             |
-| `AFM_DB_PATH`          | `/data/autofilemover.db`   | SQLite database path.                         |
+| `AFM_DB_PATH`          | `/appdata/autofilemover.db`   | SQLite database path.                         |
 | `AFM_MEDIA_ROOT`       | `/dataroot`                | Root of the mounted media volume.             |
 | `AFM_STABILITY_WINDOW` | `30s`                      | Quiet time before a download is processed.    |
 | `AFM_SCAN_INTERVAL`    | `5m`                       | Fallback periodic scan interval.              |
