@@ -29,6 +29,11 @@ func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFold
 	}
 	destDir := lib.Path
 	if subFolder != "" {
+		// User input: this endpoint accepts exactly one existing folder name,
+		// not a nested path. Reject separators and ".." sequences up front.
+		if strings.Contains(subFolder, "/") || strings.Contains(subFolder, "\\") || strings.Contains(subFolder, "..") {
+			return fmt.Errorf("ungültiger Zielordner: %s", subFolder)
+		}
 		destDir = filepath.Join(lib.Path, subFolder)
 	}
 	// Keep the destination inside the library: reject a sub-folder that escapes
