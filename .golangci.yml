@@ -12,6 +12,13 @@ linters:
         - (io.ReadCloser).Close
         - (*database/sql.Rows).Close
         - (*database/sql.Stmt).Close
+    staticcheck:
+      checks:
+        - all
+        # ST1005 verlangt kleingeschriebene, englische Fehlertexte. Diese
+        # Meldungen sind bewusst deutsch und werden in der Review-UI
+        # angezeigt, deshalb gilt die Regel hier nicht.
+        - -ST1005
 formatters:
   enable:
     - gofmt

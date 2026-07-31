@@ -148,13 +148,13 @@ func buildUserPrompt(req Request) string {
 		b.WriteString("(none)\n")
 	}
 	for _, f := range req.Files {
-		b.WriteString(fmt.Sprintf("- %s (%s)\n", f.Path, humanSize(f.SizeBytes)))
+		fmt.Fprintf(&b, "- %s (%s)\n", f.Path, humanSize(f.SizeBytes))
 	}
 	b.WriteString("\nAvailable target libraries:\n")
 	for _, l := range req.Libraries {
-		b.WriteString(fmt.Sprintf("- name=%q kind=%q", l.Name, l.Kind))
+		fmt.Fprintf(&b, "- name=%q kind=%q", l.Name, l.Kind)
 		if l.Description != "" {
-			b.WriteString(fmt.Sprintf(" description=%q", l.Description))
+			fmt.Fprintf(&b, " description=%q", l.Description)
 		}
 		if len(l.ExistingFolders) > 0 {
 			b.WriteString(" existing_folders=[")
@@ -163,9 +163,9 @@ func buildUserPrompt(req Request) string {
 					b.WriteString(", ")
 				}
 				if f.Description != "" {
-					b.WriteString(fmt.Sprintf("{name=%q, description=%q}", f.Name, f.Description))
+					fmt.Fprintf(&b, "{name=%q, description=%q}", f.Name, f.Description)
 				} else {
-					b.WriteString(fmt.Sprintf("%q", f.Name))
+					fmt.Fprintf(&b, "%q", f.Name)
 				}
 			}
 			b.WriteString("]")

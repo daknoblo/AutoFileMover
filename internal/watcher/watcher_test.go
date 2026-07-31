@@ -24,7 +24,7 @@ func TestWatcherRunShutsDownCleanly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx0 := context.Background()
 	src := filepath.Join(dir, "src")

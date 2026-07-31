@@ -78,7 +78,7 @@ func TestCreateTargetFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
 	libDir := filepath.Join(dir, "Serien")
@@ -180,7 +180,7 @@ func testEngine(t *testing.T) (*Engine, *store.Store, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { _ = st.Close() })
 	eng := New(st, config.Config{MediaRoot: dir}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return eng, st, dir
 }

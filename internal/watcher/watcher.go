@@ -46,7 +46,7 @@ func (w *Watcher) Run(ctx context.Context, scanInterval time.Duration) error {
 		return err
 	}
 	w.fsw = fsw
-	defer fsw.Close()
+	defer func() { _ = fsw.Close() }()
 	defer w.stopTimer()
 
 	w.Resync(ctx)
