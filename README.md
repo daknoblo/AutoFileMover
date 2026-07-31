@@ -1,177 +1,180 @@
 # AutoFileMover
 
 [![CI](https://github.com/daknoblo/AutoFileMover/actions/workflows/ci.yml/badge.svg)](https://github.com/daknoblo/AutoFileMover/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/daknoblo/AutoFileMover)](https://goreportcard.com/report/github.com/daknoblo/AutoFileMover)
+[![Release](https://img.shields.io/github/v/release/daknoblo/AutoFileMover)](https://github.com/daknoblo/AutoFileMover/releases/latest)
+[![Go](https://img.shields.io/github/go-mod/go-version/daknoblo/AutoFileMover)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/ghcr.io-autofilemover-blue?logo=docker)](https://github.com/daknoblo/AutoFileMover/pkgs/container/autofilemover)
 
-Ein selbst gehosteter Service, der heruntergeladene Medien automatisch erkennt,
-per **KI-Endpoint** semantisch klassifiziert und in die passende
-**Jellyfin-Bibliothek** (Filme, Serien, Dokumentationen) verschiebt.
+A self-hosted service that detects downloaded media, classifies it semantically
+through an **AI endpoint** and moves it into the matching **Jellyfin library**
+(movies, series, documentaries).
 
-Geschrieben in **Go**, läuft als **Docker-Container** und bringt eine
-Web-Oberfläche mit (für Betrieb hinter einem Reverse Proxy gedacht).
+Written in **Go**, runs as a **Docker container** and ships a web interface
+(intended to run behind a reverse proxy).
 
-## Funktionsweise
+> **Note on language:** the web interface is bilingual (German/English). Code,
+> comments and this documentation are English.
 
-1. Der Medienordner wird in den Container gemountet (`/dataroot`). Darin liegen der
-   Download-Ordner sowie die Ziel-Bibliotheken.
-2. Ein **Watcher** (`fsnotify`) überwacht die konfigurierten **Quellordner**.
-   Sobald ein Download „stabil“ ist (eine konfigurierbare Zeit nicht mehr
-   verändert), wird er verarbeitet.
-3. Der **Scanner** liest den Wurzelordner (oder die Einzeldatei) inklusive aller
-   enthaltenen Dateien aus.
-4. Diese Informationen werden zusammen mit den verfügbaren Bibliotheken (und bei
-   Serien den vorhandenen Serienordnern) an einen **OpenAI-kompatiblen
-   KI-Endpoint** (z. B. **Azure AI Foundry / Azure OpenAI**) übergeben. Die KI
-   liefert Typ, Zielbibliothek, ggf. Serienordner und eine **Wahrscheinlichkeit**
-   (0–1) zurück.
-5. Liegt die Wahrscheinlichkeit **über dem eingestellten Schwellwert** (Standard
-   90 %) und ist ein Ziel eindeutig auflösbar, wird **automatisch verschoben**.
-6. Andernfalls (zu unsicher, kein passender Serienordner, KI nicht erreichbar)
-   landet das Element in der **Review-Queue** und kann in der UI manuell
-   bestätigt oder abgelehnt werden.
+## How it works
 
-### Manuelles Ziel & Fehlerfälle
+1. The media folder is mounted into the container (`/dataroot`). It contains the
+   download folder as well as the target libraries.
+2. A **watcher** (`fsnotify`) monitors the configured **source folders**. As soon
+   as a download is "stable" (unchanged for a configurable period), it is
+   processed.
+3. The **scanner** reads the root folder (or the single file) including all files
+   it contains.
+4. This information is passed, together with the available libraries (and for
+   series the existing series folders), to an **OpenAI-compatible AI endpoint**
+   (e.g. **Azure AI Foundry / Azure OpenAI**). The AI returns the type, the target
+   library, optionally a series folder, and a **confidence** (0–1).
+5. If the confidence is **above the configured threshold** (default 90 %) and a
+   target resolves unambiguously, the item is **moved automatically**.
+6. Otherwise (too uncertain, no matching series folder, AI unreachable) the item
+   ends up in the **review queue**, where it can be confirmed or rejected
+   manually in the UI.
 
-Liefert die KI keine brauchbare Einschätzung (Fehler des Endpoints, 0 % Konfidenz
-oder kein auflösbares Ziel), blendet die Review-Karte automatisch die manuelle
-**Ziel-Auswahl** (Bibliothek + optionaler Serienordner) ein. Karten mit bereits
-aufgelöstem Ziel bieten zusätzlich „Ziel manuell wählen“ zum Überschreiben.
-Existiert der gewünschte Zielordner noch nicht, lässt sich in derselben Auswahl
-ein **neuer Ordner anlegen** (Name eingeben → „Ordner anlegen“; wird direkt
-unterhalb der Bibliothek erstellt und als Ziel gesetzt). Anschließend markiert
-man die Datei(en) mit den Move/Delete/Review-Buttons und führt den Plan aus; das
-Setzen oder Anlegen eines Ziels von Hand löscht den Fehler und stellt das Element
-auf normales Review.
+### Manual target & error cases
 
-Ein **fehlgeschlagener** KI-Aufruf wird beim erneuten Scan **nicht** automatisch
-wiederholt – der Endpoint wird also nicht endlos angefragt. Ein neuer Versuch
-erfolgt nur explizit über „KI-Abgleich“.
+If the AI does not return a usable assessment (endpoint error, 0 % confidence or
+no resolvable target), the review card automatically shows the manual **target
+selection** (library plus optional series folder). Cards with an already resolved
+target additionally offer "choose target manually" to override it. If the desired
+target folder does not exist yet, the same selection lets you **create a new
+folder** (enter a name → "create folder"; it is created directly below the
+library and set as the target). You then mark the file(s) with the
+move/delete/review buttons and execute the plan; setting or creating a target by
+hand clears the error and puts the item back into normal review.
 
-### Regeln für die Zuordnung
+A **failed** AI call is **not** retried automatically on the next scan — the
+endpoint is therefore not queried endlessly. A new attempt only happens
+explicitly via "AI match".
 
-Pro Bibliothek steuert die Checkbox **„Unterordner pro Titel verwenden"**, wie
-einsortiert wird (in den Einstellungen jederzeit umschaltbar; Standard: aus für
-Filme, an für Serien/Dokus):
+### Assignment rules
 
-- **Unterordner aus** (typisch Filme) → das Element landet direkt im
-  Bibliotheks-Wurzelordner.
-- **Unterordner an** (typisch Serien/Dokus) → das Element wird **nur in einen
-  bereits existierenden Unterordner** einsortiert. Findet die KI keinen
-  passenden, wandert es in die Review-Queue, wo sich der Ordner manuell wählen
-  oder neu anlegen lässt.
-- Dateien werden **verschoben** (move), bei unterschiedlichen Dateisystemen
-  automatisch per copy + delete (Cross-Device-Fallback).
+Per library, the **"use a subfolder per title"** checkbox controls how items are
+filed (switchable in the settings at any time; default: off for movies, on for
+series and documentaries):
 
-### Entscheidung pro Datei
+- **Subfolder off** (typical for movies) → the item lands directly in the
+  library's root folder.
+- **Subfolder on** (typical for series/documentaries) → the item is only filed
+  into an **already existing subfolder**. If the AI finds no matching one, the
+  item goes to the review queue, where the folder can be selected or created
+  manually.
+- Files are **moved**; across different file systems this automatically falls
+  back to copy + delete (cross-device fallback).
 
-Ein Quellordner enthält oft mehrere Dateien (Film, Sample, NFO …). Die KI bewertet
-**jede Datei einzeln** und schlägt eine Aktion mit Wahrscheinlichkeit vor:
+### Per-file decision
 
-- `move` – die eigentliche Mediendatei (größtes Video + Untertitel) → ins Ziel.
-- `delete` – Sample-Clips, `.nfo`, Screenshots, Prüfsummen → endgültig löschen.
-- `keep` – unsicher → bleibt für manuelle Prüfung.
+A source folder often contains several files (movie, sample, NFO …). The AI
+evaluates **each file individually** and proposes an action with a confidence:
 
-In der Review-Queue erscheint der Ordner mit allen Dateien, Aktions-Label und
-Prozent. Bei sicherem Auto-Move wird der Film verschoben, Reste gelöscht und der
-leere Quellordner entfernt; im What-If lässt sich alles vorab pro Datei steuern.
+- `move` – the actual media file (largest video plus subtitles) → to the target.
+- `delete` – sample clips, `.nfo`, screenshots, checksums → deleted permanently.
+- `keep` – uncertain → stays for manual review.
 
-### Kollisionen mit vorhandenen Dateien
+The review queue shows the folder with all files, action labels and percentages.
+On a confident auto-move the movie is moved, leftovers are deleted and the empty
+source folder is removed; in what-if mode everything can be controlled per file
+beforehand.
 
-Bevor eine Datei verschoben wird, prüft der Dienst das Zielverzeichnis auf eine
-**bereits vorhandene** Datei – entweder mit identischem Namen oder mit derselben
-Episode (`SxxExx`) unter einem anderen Release-Namen. Wird eine gefunden, wandert
-das Element automatisch in die Review-Queue (kein Auto-Move, kein Überschreiben).
+### Collisions with existing files
 
-Dort zeigt eine **Gegenüberstellung** beide Kandidaten nebeneinander: Dateiname,
-Größe und die aus dem Release-Namen abgeleiteten Qualitätsmerkmale (Auflösung,
-Codec, HDR/DV, Quelle – ganz ohne `ffprobe`, damit das Image schlank bleibt). Pro
-Konflikt entscheidet man:
+Before a file is moved, the service checks the target directory for an
+**existing** file — either with an identical name or with the same episode
+(`SxxExx`) under a different release name. If one is found, the item goes to the
+review queue automatically (no auto-move, no overwriting).
 
-- **Neue übernehmen (ersetzen)** – die vorhandene Datei wird gelöscht und die neue
-  verschoben.
-- **Vorhandene behalten** – die vorhandene Datei bleibt, die neue (doppelte) wird
-  aus dem Quellordner entfernt.
+There, a **side-by-side comparison** shows both candidates: file name, size and
+the quality attributes derived from the release name (resolution, codec, HDR/DV,
+source — entirely without `ffprobe`, so the image stays small). You decide per
+conflict:
 
-Solange ein Konflikt offen ist, bleibt „Plan ausführen“ deaktiviert.
+- **Take the new one (replace)** – the existing file is deleted and the new one
+  is moved.
+- **Keep the existing one** – the existing file stays and the new (duplicate) one
+  is removed from the source folder.
 
-### Sprache & Über
+As long as a conflict is unresolved, "execute plan" stays disabled.
 
-Die Oberfläche ist zweisprachig (Deutsch/Englisch, Umschalter im Header). Der
-**Über**-Tab zeigt Version, Commit, Build-Datum und Go-Version; Header/Footer
-verlinken auf das Repository.
+### Language & About
 
-## Schnellstart (Docker Compose)
+The interface is bilingual (German/English, switch in the header). The **About**
+tab shows version, commit, build date and Go version; header and footer link to
+the repository.
 
-`docker-compose.yml` anpassen (insbesondere das Media-Volume) und starten:
+## Quick start (Docker Compose)
+
+Adjust `docker-compose.yml` (especially the media volume) and start it:
 
 ```bash
 docker compose up -d
 ```
 
-Danach die Web-UI öffnen: <http://localhost:8080>
+Then open the web UI: <http://localhost:8080>
 
-In der UI:
+In the UI:
 
-1. **Quellordner** anlegen, z. B. `/dataroot/Downloads`.
-2. **Bibliotheken** anlegen, z. B.
-   - `Filme` (Film) → `/dataroot/Filme`
-   - `Serien` (Serie) → `/dataroot/Serien`
-   - `Dokus` (Dokumentation) → `/dataroot/Dokumentationen`
-3. Unter **Einstellungen** den KI-Endpoint konfigurieren und den Schwellwert
-   sowie „Automatisches Verschieben“ festlegen.
+1. Add a **source folder**, e.g. `/dataroot/Downloads`.
+2. Add **libraries**, e.g.
+   - `Movies` (movie) → `/dataroot/Movies`
+   - `Series` (series) → `/dataroot/Series`
+   - `Docs` (documentary) → `/dataroot/Documentaries`
+3. Under **settings**, configure the AI endpoint and set the threshold as well as
+   "automatic moving".
 
-> Alle in der UI angegebenen Pfade müssen **innerhalb** von `AFM_MEDIA_ROOT`
-> liegen und existieren.
+> All paths entered in the UI must live **inside** `AFM_MEDIA_ROOT` and must
+> exist.
 
-## KI-Endpoint konfigurieren (Azure AI Foundry / Azure OpenAI)
+## Configuring the AI endpoint (Azure AI Foundry / Azure OpenAI)
 
-| Feld              | Beispiel                                   |
-| ----------------- | ------------------------------------------ |
-| Base URL          | `https://<resource>.openai.azure.com`      |
-| Deployment/Modell | `gpt-4o-mini` (Name deines Deployments)    |
-| Azure API-Version | `2024-06-01`                               |
-| API-Key           | dein Azure-Key                             |
+| Field              | Example                                    |
+| ------------------ | ------------------------------------------ |
+| Base URL           | `https://<resource>.openai.azure.com`      |
+| Deployment/model   | `gpt-4o-mini` (the name of your deployment)|
+| Azure API version  | `2024-06-01`                               |
+| API key            | your Azure key                             |
 
-- Ist eine **API-Version** gesetzt, wird der **Azure-Modus** verwendet
-  (`/openai/deployments/<model>/chat/completions?api-version=...`, Header
+- If an **API version** is set, **Azure mode** is used
+  (`/openai/deployments/<model>/chat/completions?api-version=...`, header
   `api-key`).
-- Bleibt die API-Version **leer**, wird der Standard-OpenAI-Pfad genutzt
-  (`/v1/chat/completions`, Header `Authorization: Bearer ...`). Base URL dann
-  z. B. `https://api.openai.com/v1`.
+- If the API version stays **empty**, the standard OpenAI path is used
+  (`/v1/chat/completions`, header `Authorization: Bearer ...`). The base URL is then
+  e.g. `https://api.openai.com/v1`.
 
-Der API-Key wird in der Datenbank gespeichert und in der UI nur als „gesetzt“
-angezeigt, nie zurückgegeben.
+The API key is stored in the database and only shown as "set" in the UI, never
+returned.
 
-## Konfiguration (Umgebungsvariablen)
+## Configuration (environment variables)
 
-| Variable                | Standard                      | Beschreibung                                         |
+| Variable                | Default                       | Description                                          |
 | ----------------------- | ----------------------------- | ---------------------------------------------------- |
-| `AFM_HTTP_ADDR`         | `:8080`                       | Listen-Adresse des Webservers                        |
-| `AFM_DB_PATH`           | `/appdata/autofilemover.db`      | Pfad der SQLite-Datenbank                            |
-| `AFM_MEDIA_ROOT`        | `/dataroot`                   | Wurzel des gemounteten Medienverzeichnisses          |
-| `AFM_STABILITY_WINDOW`  | `30s`                         | Ruhezeit, bevor ein Download verarbeitet wird        |
-| `AFM_SCAN_INTERVAL`     | `5m`                          | Fallback-Intervall für periodische Scans             |
+| `AFM_HTTP_ADDR`         | `:8080`                       | Listen address of the web server                     |
+| `AFM_DB_PATH`           | `/appdata/autofilemover.db`   | Path of the SQLite database                          |
+| `AFM_MEDIA_ROOT`        | `/dataroot`                   | Root of the mounted media directory                  |
+| `AFM_STABILITY_WINDOW`  | `30s`                         | Quiet period before a download is processed          |
+| `AFM_SCAN_INTERVAL`     | `5m`                          | Fallback interval for periodic scans                 |
 | `AFM_LOG_LEVEL`         | `info`                        | `debug`, `info`, `warn`, `error`                     |
 
-Anwendungseinstellungen (KI-Config, Schwellwert, Quellen, Bibliotheken) werden
-in der Datenbank gespeichert und über die UI verwaltet.
+Application settings (AI config, threshold, sources, libraries) are stored in the
+database and managed through the UI.
 
-## Lokale Entwicklung (Dev Container)
+## Local development (dev container)
 
-Das Repository enthält einen Dev Container (`.devcontainer/devcontainer.json`)
-mit Go-Toolchain. In VS Code per „Reopen in Container“ öffnen, dann:
+The repository contains a dev container (`.devcontainer/devcontainer.json`) with
+the Go toolchain. Open it in VS Code via "Reopen in Container", then:
 
 ```bash
-mkdir -p devmedia/Downloads devmedia/Filme data
+mkdir -p devmedia/Downloads devmedia/Movies data
 go run ./cmd/autofilemover
 ```
 
-Die UI ist anschließend unter Port `8080` erreichbar. Der Dev Container setzt
-`AFM_MEDIA_ROOT` auf `devmedia` und ein kurzes Stability-Window.
+The UI is then reachable on port `8080`. The dev container sets `AFM_MEDIA_ROOT`
+to `devmedia` and a short stability window.
 
-### Build & Tests
+### Build & tests
 
 ```bash
 go build ./...
@@ -179,54 +182,54 @@ go vet ./...
 go test ./...
 ```
 
-## Dokumentation
+## Documentation
 
 - [docs/installation.md](docs/installation.md)
 - [docs/configuration.md](docs/configuration.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/development.md](docs/development.md)
 
-## Sicherheit
+## Security
 
-- Keine eingebaute Authentifizierung – hinter Reverse Proxy/VPN betreiben.
-- API-Key wird in der DB gespeichert, nie an die UI zurückgegeben.
-- Pfade werden gegen `AFM_MEDIA_ROOT` validiert; Datei-Aktionen wirken nur auf
-  bereits gescannte Dateien. Löschen ist endgültig (vorher What-If nutzen).
-- Container läuft als non-root Distroless-Image mit eigenem Healthcheck.
+- No built-in authentication — run it behind a reverse proxy or VPN.
+- The API key is stored in the database and never returned to the UI.
+- Paths are validated against `AFM_MEDIA_ROOT`; file actions only apply to
+  already scanned files. Deletion is permanent (use what-if first).
+- The container runs as a non-root distroless image with its own healthcheck.
 
-## Container-Image (GitHub Action)
+## Container image (GitHub Actions)
 
-`.github/workflows/ci.yml` prüft Vet, Lint, Tests und statische Builds.
-`.github/workflows/release.yml` baut und veröffentlicht das Container-Image nach
-**GHCR** (`ghcr.io/<owner>/<repo>`) für `linux/amd64` und `linux/arm64`,
-erzeugt SBOM/Provenance, signiert keyless mit cosign und lädt den Trivy-Scan
-als SARIF hoch.
+`.github/workflows/ci.yml` checks vet, lint, tests and static builds.
+`.github/workflows/release.yml` builds and publishes the container image to
+**GHCR** (`ghcr.io/<owner>/<repo>`) for `linux/amd64` and `linux/arm64`,
+generates SBOM and provenance, signs keyless with cosign and uploads the Trivy
+scan as SARIF.
 
-- `main`: Tag `stable`
-- `develop`: Tag `dev`
-- Releases: per Git-Tag `vX.Y.Z` (semver-Tags werden erzeugt)
+- `main`: tag `stable`
+- `develop`: tag `dev`
+- Releases: via git tag `vX.Y.Z` (semver tags are generated)
 
-## Projektstruktur
+## Project structure
 
 ```
-cmd/autofilemover/    # main, Verdrahtung & Graceful Shutdown
-internal/config/      # Env-Konfiguration
-internal/store/       # SQLite (Settings, Sources, Libraries, Items)
-internal/ai/          # OpenAI-/Azure-kompatibler Client + Classifier
-internal/scanner/     # Download-Erkennung & Datei-Auslesen
-internal/mover/       # Verschieben mit Cross-Device-Fallback
-internal/engine/      # Orchestrierung: scan → classify → decide → move/queue
-internal/watcher/     # fsnotify-Überwachung + periodischer Scan
-internal/web/         # REST-API + eingebettete Web-UI (DE/EN)
-internal/version/     # Build-Metadaten (ldflags)
+cmd/autofilemover/    # main, wiring & graceful shutdown
+internal/config/      # env configuration
+internal/store/       # SQLite (settings, sources, libraries, items)
+internal/ai/          # OpenAI/Azure compatible client + classifier
+internal/scanner/     # download detection & file reading
+internal/mover/       # moving with cross-device fallback
+internal/engine/      # orchestration: scan → classify → decide → move/queue
+internal/watcher/     # fsnotify monitoring + periodic scan
+internal/web/         # REST API + embedded web UI (DE/EN)
+internal/version/     # build metadata (ldflags)
 ```
 
-## Hinweise zu Rechten
+## Notes on permissions
 
-Verschobene Dateien gehören dem Nutzer, unter dem der Container läuft. Für
-korrekte Jellyfin-Rechte in `docker-compose.yml` `user: "PUID:PGID"` passend zu
-deinem Medienordner setzen.
+Moved files belong to the user the container runs as. For correct Jellyfin
+permissions, set `user: "PUID:PGID"` in `docker-compose.yml` to match your media
+folder.
 
-## Lizenz
+## License
 
-Veröffentlicht unter der [MIT-Lizenz](LICENSE).
+Released under the [MIT License](LICENSE).

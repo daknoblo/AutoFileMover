@@ -17,8 +17,11 @@ Dockerfile, GitHub Actions, Tests und Dokumentation daran halten.
 - **Pure-Go / CGO-frei:** Immer `CGO_ENABLED=0` bauen. Für SQLite wird
   `modernc.org/sqlite` verwendet; kein `mattn/go-sqlite3` und keine C-Toolchain.
 - **Standardbibliothek zuerst.** Abhängigkeiten nur einführen, wenn sie klaren
-  Mehrwert bieten. Bezeichner bleiben Englisch, Kommentare/Texte Deutsch oder
-  Englisch wie im bestehenden Code.
+  Mehrwert bieten.
+- **Sprachregelung:** Code-Bezeichner und die Dokumentation (README, `docs/`,
+  Release Notes) sind **Englisch**. Code-Kommentare folgen dem bestehenden Code;
+  die Web-UI ist zweisprachig (DE/EN). Nutzerseitige Fehlertexte dürfen deutsch
+  bleiben – deshalb ist `ST1005` in `.golangci.yml` deaktiviert.
 
 ## 2. Projektstruktur
 
