@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -147,5 +148,33 @@ func TestBrowseClampsTraversal(t *testing.T) {
 	}
 	if !br.AtRoot {
 		t.Error("clamped browse should report at_root=true")
+	}
+}
+
+func TestBrowseClampsSymlinkEscape(t *testing.T) {
+	ts, _, dir := testHTTP(t)
+	outside := t.TempDir()
+	link := filepath.Join(dir, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/api/browse?path=" + url.QueryEscape(link))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var br struct {
+		Path   string `json:"path"`
+		AtRoot bool   `json:"at_root"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&br); err != nil {
+		t.Fatal(err)
+	}
+	if br.Path != filepath.Clean(dir) {
+		t.Errorf("symlink escape not clamped to media root: path=%q want %q", br.Path, filepath.Clean(dir))
+	}
+	if !br.AtRoot {
+		t.Error("clamped symlink browse should report at_root=true")
 	}
 }

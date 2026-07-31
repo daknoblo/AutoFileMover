@@ -47,17 +47,33 @@ func splitLines(s string) []string {
 	return out
 }
 
+// resolveWithinMediaRoot resolves symlinks for p when possible and ensures the
+// resulting path stays inside the configured media root.
+func (s *Server) resolveWithinMediaRoot(p string) (string, error) {
+	root, err := filepath.EvalSymlinks(filepath.Clean(s.cfg.MediaRoot))
+	if err != nil {
+		return "", fmt.Errorf("media root does not exist: %s", filepath.Clean(s.cfg.MediaRoot))
+	}
+	clean := filepath.Clean(p)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		clean = filepath.Clean(resolved)
+	}
+	// Keep clean inside the media root after resolving symlinks: filepath.Rel
+	// yields a ".." prefix when clean escapes root, which we reject.
+	if rel, relErr := filepath.Rel(root, clean); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("path must be inside the media root (%s)", root)
+	}
+	return clean, nil
+}
+
 // validatePath ensures p is an absolute, existing directory inside the media root.
 func (s *Server) validatePath(p string) error {
 	if p == "" || !filepath.IsAbs(p) {
 		return fmt.Errorf("path must be absolute")
 	}
-	clean := filepath.Clean(p)
-	root := filepath.Clean(s.cfg.MediaRoot)
-	// Keep clean inside the media root: filepath.Rel yields a path starting with
-	// ".." when clean escapes root, which we reject.
-	if rel, relErr := filepath.Rel(root, clean); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return fmt.Errorf("path must be inside the media root (%s)", root)
+	clean, err := s.resolveWithinMediaRoot(p)
+	if err != nil {
+		return err
 	}
 	info, err := os.Stat(clean)
 	if err != nil {
@@ -641,15 +657,19 @@ type browseResponse struct {
 }
 
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
-	root := filepath.Clean(s.cfg.MediaRoot)
+	root, err := s.resolveWithinMediaRoot(s.cfg.MediaRoot)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	p := strings.TrimSpace(r.URL.Query().Get("path"))
 	if p == "" {
 		p = root
 	}
-	clean := filepath.Clean(p)
-	// Constrain browsing to the media root; fall back to the root when the
-	// requested path escapes it (filepath.Rel yields a ".." prefix in that case).
-	if rel, relErr := filepath.Rel(root, clean); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	clean, err := s.resolveWithinMediaRoot(p)
+	if err != nil {
+		// Constrain browsing to the media root; fall back to the root when the
+		// requested path escapes it, including via symlinks.
 		clean = root
 	}
 	info, err := os.Stat(clean)
