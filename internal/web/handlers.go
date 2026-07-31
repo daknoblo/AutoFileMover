@@ -642,15 +642,27 @@ type browseResponse struct {
 
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 	root := filepath.Clean(s.cfg.MediaRoot)
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "invalid media root")
+		return
+	}
 	p := strings.TrimSpace(r.URL.Query().Get("path"))
 	if p == "" {
-		p = root
+		p = rootAbs
 	}
-	clean := filepath.Clean(p)
+	candidate := p
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(rootAbs, candidate)
+	}
+	clean, err := filepath.Abs(candidate)
+	if err != nil {
+		clean = rootAbs
+	}
 	// Constrain browsing to the media root; fall back to the root when the
 	// requested path escapes it (filepath.Rel yields a ".." prefix in that case).
-	if rel, relErr := filepath.Rel(root, clean); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		clean = root
+	if rel, relErr := filepath.Rel(rootAbs, clean); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		clean = rootAbs
 	}
 	info, err := os.Stat(clean)
 	if err != nil || !info.IsDir() {
@@ -678,7 +690,7 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parent := filepath.Dir(clean)
-	atRoot := clean == root
+	atRoot := clean == rootAbs
 	if atRoot {
 		parent = clean
 	}
