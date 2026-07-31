@@ -177,15 +177,23 @@ func (e *Engine) applyNewFolder(ctx context.Context, item *store.Item, lib store
 	if folder == "" {
 		return fmt.Errorf("ungültiger Ordnername")
 	}
+	baseDir, err := filepath.Abs(lib.Path)
+	if err != nil {
+		return fmt.Errorf("ungültiger Bibliothekspfad")
+	}
 	// If a folder with this name already exists (case-insensitively), reuse it
 	// instead of creating a near-duplicate that differs only in case/spacing.
-	if existing := matchSubfolder(lib.Path, folder); existing != "" {
+	if existing := matchSubfolder(baseDir, folder); existing != "" {
 		folder = existing
 	}
-	dir := filepath.Join(lib.Path, folder)
-	// Safety: the new folder must be a direct child of the library path and may
-	// not escape it via ".."; filepath.Rel makes the containment explicit.
-	if rel, relErr := filepath.Rel(lib.Path, dir); relErr != nil || rel != folder {
+	dir, err := filepath.Abs(filepath.Join(baseDir, folder))
+	if err != nil {
+		return fmt.Errorf("ungültiger Ordnername")
+	}
+	// Safety: the new folder must resolve to a direct child of the library path.
+	// filepath.Rel rejects escapes via ".."; filepath.Base(rel) ensures the
+	// resulting path has exactly one segment below the library root.
+	if rel, relErr := filepath.Rel(baseDir, dir); relErr != nil || rel != folder || filepath.Base(rel) != rel {
 		return fmt.Errorf("ungültiger Ordnername")
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
