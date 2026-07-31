@@ -221,3 +221,7 @@ internal/version/     # Build-Metadaten (ldflags)
 Verschobene Dateien gehören dem Nutzer, unter dem der Container läuft. Für
 korrekte Jellyfin-Rechte in `docker-compose.yml` `user: "PUID:PGID"` passend zu
 deinem Medienordner setzen.
+
+## Lizenz
+
+Veröffentlicht unter der [MIT-Lizenz](LICENSE).
