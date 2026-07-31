@@ -178,3 +178,26 @@ func TestBrowseClampsSymlinkEscape(t *testing.T) {
 		t.Error("clamped symlink browse should report at_root=true")
 	}
 }
+
+func TestAddSourceRejectsSymlinkEscapingMediaRoot(t *testing.T) {
+	ts, _, mediaRoot := testHTTP(t)
+	outside := t.TempDir()
+	escape := filepath.Join(mediaRoot, "escape")
+	if err := os.Symlink(outside, escape); err != nil {
+		t.Skipf("symlink not supported in test environment: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/sources", strings.NewReader(`{"path":"`+escape+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("escaped symlink should be rejected with 400, got %d", resp.StatusCode)
+	}
+}
