@@ -23,4 +23,4 @@ services:
       - ./appdata:/appdata
       # Your media root containing Downloads + Jellyfin libraries.
       # It is mounted as /dataroot, which then becomes the root in the web UI.
-      - /data/mounts/storage-box/media/:/dataroot
+      - /srv/media:/dataroot

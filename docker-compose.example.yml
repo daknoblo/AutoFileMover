@@ -23,7 +23,7 @@ services:
       - autofilemover-data:/appdata
       # Medienwurzel mit Downloads und Zielbibliotheken; Pfade in der UI liegen
       # innerhalb von AFM_MEDIA_ROOT (/dataroot).
-      - /data/mounts/storage-box/media/:/dataroot
+      - /srv/media:/dataroot
     read_only: true
     tmpfs:
       - /tmp

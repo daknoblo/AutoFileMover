@@ -1,5 +1,10 @@
 # AutoFileMover
 
+[![CI](https://github.com/daknoblo/AutoFileMover/actions/workflows/ci.yml/badge.svg)](https://github.com/daknoblo/AutoFileMover/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/daknoblo/AutoFileMover)](https://goreportcard.com/report/github.com/daknoblo/AutoFileMover)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![GHCR](https://img.shields.io/badge/ghcr.io-autofilemover-blue?logo=docker)](https://github.com/daknoblo/AutoFileMover/pkgs/container/autofilemover)
+
 Ein selbst gehosteter Service, der heruntergeladene Medien automatisch erkennt,
 per **KI-Endpoint** semantisch klassifiziert und in die passende
 **Jellyfin-Bibliothek** (Filme, Serien, Dokumentationen) verschiebt.
