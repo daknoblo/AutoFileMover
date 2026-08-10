@@ -1,0 +1,14 @@
+{
+  "name": "autofilemover-screenshots",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generates the AutoFileMover documentation screenshots from the afm-demo instance.",
+  "license": "MIT",
+  "scripts": {
+    "capture": "node capture.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
+  }
+}

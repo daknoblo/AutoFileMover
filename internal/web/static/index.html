@@ -60,7 +60,7 @@
 			<div class="logs-bar">
 				<h2 data-i18n="tab_logs">Logs</h2>
 				<div class="logs-controls">
-					<label data-i18n="log_level">Level
+					<label><span data-i18n="log_level">Level</span>
 						<select id="logLevel">
 							<option value="debug">DEBUG</option>
 							<option value="info">INFO</option>
@@ -145,28 +145,28 @@
 		<div class="modal-box">
 			<h3 id="pickerTitle">Ordner wählen</h3>
 			<div class="browser-bar">
-				<button id="pickerUp" class="btn small secondary" type="button">▲ Übergeordnet</button>
+				<button id="pickerUp" class="btn small secondary" type="button" data-i18n="picker_up">▲ Übergeordnet</button>
 				<span id="pickerPath" class="browse-path"></span>
 			</div>
 			<ul id="pickerList" class="browse-list"></ul>
-			<div id="pickerSelected" class="picker-selected">Aktueller Ordner: <code id="pickerSelectedPath"></code></div>
+			<div id="pickerSelected" class="picker-selected"><span data-i18n="picker_current">Aktueller Ordner:</span> <code id="pickerSelectedPath"></code></div>
 			<div id="libFields" class="stacked-form" hidden>
-				<label>Name <input type="text" id="libName" placeholder="z. B. Filme" /></label>
-				<label>Typ
+				<label><span data-i18n="picker_name">Name</span> <input type="text" id="libName" data-i18n-ph="lib_name_ph" placeholder="z. B. Filme" /></label>
+				<label><span data-i18n="picker_type">Typ</span>
 					<select id="libKind">
-						<option value="movie">Film</option>
-						<option value="series">Serie</option>
-						<option value="documentary">Dokumentation</option>
+						<option value="movie" data-i18n="kind_movie">Film</option>
+						<option value="series" data-i18n="kind_series">Serie</option>
+						<option value="documentary" data-i18n="kind_doc">Dokumentation</option>
 					</select>
 				</label>
 				<label class="checkbox"><input type="checkbox" id="libUseSubfolders" checked /> <span data-i18n="lib_use_subfolders">Unterordner pro Titel verwenden</span></label>
 			</div>
-			<label class="picker-desc" id="pickerDescLabel">Beschreibung (KI-Kontext, optional)
-				<input type="text" id="pickerDesc" placeholder="z. B. Alle deutschen Dokumentationen" />
+			<label class="picker-desc" id="pickerDescLabel"><span data-i18n="picker_desc">Beschreibung (KI-Kontext, optional)</span>
+				<input type="text" id="pickerDesc" data-i18n-ph="desc_ph" placeholder="z. B. Alle deutschen Dokumentationen" />
 			</label>
 			<div class="modal-actions">
-				<button id="pickerCancel" class="btn secondary" type="button">Abbrechen</button>
-				<button id="pickerConfirm" class="btn" type="button">Diesen Ordner verwenden</button>
+				<button id="pickerCancel" class="btn secondary" type="button" data-i18n="cancel">Abbrechen</button>
+				<button id="pickerConfirm" class="btn" type="button" data-i18n="picker_confirm">Diesen Ordner verwenden</button>
 			</div>
 		</div>
 	</div>

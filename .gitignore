@@ -9,6 +9,9 @@ data/
 *.db-wal
 *.db-shm
 
+# Generated documentation site
+/site/
+
 # OS / editor
 .DS_Store
 *.log

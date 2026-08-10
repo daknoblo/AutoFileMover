@@ -26,6 +26,12 @@ func (noopResyncer) Resync(context.Context) {}
 func testHTTP(t *testing.T) (*httptest.Server, *store.Store, string) {
 	t.Helper()
 	dir := t.TempDir()
+	// The server resolves symlinks in the media root; on macOS the temp dir is
+	// itself a symlink (/var -> /private/var), so resolve it up front to keep
+	// the reported paths comparable.
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
 	st, err := store.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatal(err)

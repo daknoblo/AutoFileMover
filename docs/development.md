@@ -24,7 +24,31 @@ make vet      # go vet ./...
 make test     # go test ./...
 make lint     # golangci-lint run
 make docker   # build container image
+make demo         # seeded demo instance on http://127.0.0.1:8099
+make screenshots  # regenerate docs/images/*.png and docs/demo.md
+make site         # render README + docs/ into site/
 ```
+
+## Demo instance, screenshots & website
+
+`cmd/afm-demo` starts a throw-away instance seeded by `internal/demo`: a sample
+media tree under `/tmp/afm-demo/dataroot`, three libraries, a review queue with a
+collision and an AI error, a history and a fixed log. It never calls an AI
+endpoint and never watches the filesystem, so the state stays stable.
+
+`make screenshots` starts that instance inside the pinned Playwright container
+(`tools/screenshots/run.sh`), captures every section listed in
+`tools/screenshots/shots.mjs` and writes `docs/images/*.png` plus the generated
+`docs/demo.md`. Running it in the container keeps fonts, browser build and the
+`/dataroot` paths identical everywhere — screenshots taken on the host would
+differ. Adding a new UI section therefore only means adding one entry to
+`shots.mjs`.
+
+`make site` renders `README.md` and `docs/*.md` into the static site in `site/`
+(`tools/site` is a separate Go module so the service keeps its dependency set).
+The `Docs & demo` workflow regenerates the screenshots on every push to `main`,
+commits them when they changed and deploys the site to GitHub Pages. Publishing
+requires *Settings → Pages → Source: GitHub Actions* to be enabled once.
 
 ## Security notes
 

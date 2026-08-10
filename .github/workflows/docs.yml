@@ -1,0 +1,86 @@
+name: Docs & demo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "cmd/**"
+      - "internal/**"
+      - "tools/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "cmd/**"
+      - "internal/**"
+      - "tools/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Screenshots & site
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to push the refreshed screenshots back to main.
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Regenerate screenshots and demo page
+        run: bash tools/screenshots/run.sh
+
+      - name: Commit refreshed screenshots
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ -z "$(git status --porcelain docs/images docs/demo.md)" ]; then
+            echo "screenshots unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/images docs/demo.md
+          git commit -m "docs: refresh generated screenshots"
+          git push
+
+      - name: Build site
+        run: cd tools/site && go run . -repo ../.. -out ../../site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

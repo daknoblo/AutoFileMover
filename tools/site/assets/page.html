@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>{{ if eq .Title "AutoFileMover" }}AutoFileMover{{ else }}{{ .Title }} · AutoFileMover{{ end }}</title>
+	<meta name="description" content="{{ .Desc }}" />
+	<link rel="icon" type="image/svg+xml" href="icon.svg" />
+	<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+	<header class="site-header">
+		<a class="brand" href="index.html">
+			<img src="icon.svg" alt="" width="28" height="28" />
+			<span>AutoFileMover</span>
+		</a>
+		<nav class="site-nav">
+			{{ range .Nav }}<a href="{{ .Href }}"{{ if .Active }} class="active"{{ end }}>{{ .Label }}</a>{{ end }}
+			<a class="repo" href="{{ .Repo }}">GitHub</a>
+		</nav>
+	</header>
+
+	<main class="content">
+		{{ .Content }}
+	</main>
+
+	<footer class="site-footer">
+		<span>AutoFileMover · MIT License</span>
+		<a href="{{ .Repo }}">{{ .Repo }}</a>
+	</footer>
+</body>
+</html>

@@ -7,6 +7,18 @@ updates:
     open-pull-requests-limit: 10
     commit-message:
       prefix: "gomod"
+  - package-ecosystem: "gomod"
+    directory: "/tools/site"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "gomod"
+  - package-ecosystem: "npm"
+    directory: "/tools/screenshots"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "npm"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

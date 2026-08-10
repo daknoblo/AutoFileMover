@@ -5,6 +5,7 @@
 [![Go](https://img.shields.io/github/go-mod/go-version/daknoblo/AutoFileMover)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/ghcr.io-autofilemover-blue?logo=docker)](https://github.com/daknoblo/AutoFileMover/pkgs/container/autofilemover)
+[![Docs](https://img.shields.io/badge/docs-github%20pages-4f8cff)](https://daknoblo.github.io/AutoFileMover/)
 
 A self-hosted service that detects downloaded media, classifies it semantically
 through an **AI endpoint** and moves it into the matching **Jellyfin library**
@@ -13,8 +14,21 @@ through an **AI endpoint** and moves it into the matching **Jellyfin library**
 Written in **Go**, runs as a **Docker container** and ships a web interface
 (intended to run behind a reverse proxy).
 
+📖 **Documentation & demo:** <https://daknoblo.github.io/AutoFileMover/>
+
 > **Note on language:** the web interface is bilingual (German/English). Code,
 > comments and this documentation are English.
+
+## Screenshots
+
+All screenshots are generated automatically from a demo instance, so they always
+show the current interface — see [docs/demo.md](docs/demo.md) for every section.
+
+[![Review queue](docs/images/review-queue.png)](docs/demo.md)
+
+| Per-file decisions | Collisions |
+| --- | --- |
+| [![Per-file decisions](docs/images/review-files.png)](docs/demo.md) | [![Collision](docs/images/review-conflict.png)](docs/demo.md) |
 
 ## How it works
 
@@ -184,6 +198,10 @@ go test ./...
 
 ## Documentation
 
+The full documentation is published at
+<https://daknoblo.github.io/AutoFileMover/>.
+
+- [docs/demo.md](docs/demo.md) — screenshots of every section
 - [docs/installation.md](docs/installation.md)
 - [docs/configuration.md](docs/configuration.md)
 - [docs/architecture.md](docs/architecture.md)
@@ -204,6 +222,8 @@ go test ./...
 **GHCR** (`ghcr.io/<owner>/<repo>`) for `linux/amd64` and `linux/arm64`,
 generates SBOM and provenance, signs keyless with cosign and uploads the Trivy
 scan as SARIF.
+`.github/workflows/docs.yml` regenerates the screenshots and the demo page and
+deploys the documentation site to GitHub Pages.
 
 - `main`: tag `stable`
 - `develop`: tag `dev`
@@ -213,6 +233,7 @@ scan as SARIF.
 
 ```
 cmd/autofilemover/    # main, wiring & graceful shutdown
+cmd/afm-demo/         # seeded demo instance (screenshots, playground)
 internal/config/      # env configuration
 internal/store/       # SQLite (settings, sources, libraries, items)
 internal/ai/          # OpenAI/Azure compatible client + classifier
@@ -221,7 +242,10 @@ internal/mover/       # moving with cross-device fallback
 internal/engine/      # orchestration: scan → classify → decide → move/queue
 internal/watcher/     # fsnotify monitoring + periodic scan
 internal/web/         # REST API + embedded web UI (DE/EN)
+internal/demo/        # sample data for the demo instance
 internal/version/     # build metadata (ldflags)
+tools/screenshots/    # Playwright capture -> docs/images + docs/demo.md
+tools/site/           # static site generator for GitHub Pages
 ```
 
 ## Notes on permissions

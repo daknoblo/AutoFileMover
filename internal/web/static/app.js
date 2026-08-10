@@ -406,9 +406,9 @@ async function loadFolderNotes() {
 }
 
 function descRow(path) {
-	const input = el("input", { type: "text", class: "folder-desc", placeholder: "Beschreibung als KI-Kontext…" });
+	const input = el("input", { type: "text", class: "folder-desc", "data-i18n-ph": "desc_ph", placeholder: t("desc_ph") });
 	input.value = folderNotes[path] || "";
-	const save = el("button", { class: "btn small", type: "button", text: "Speichern" });
+	const save = el("button", { class: "btn small", type: "button", "data-i18n": "save", text: t("save") });
 	save.addEventListener("click", async () => {
 		try {
 			await api("PUT", "/folder-notes", { path, description: input.value.trim() });

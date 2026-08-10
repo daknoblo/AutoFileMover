@@ -5,6 +5,8 @@
 *.md
 docs/
 deploy/
+tools/
+site/
 
 # Lokale Daten / SQLite / Medien-Testdaten.
 data/
