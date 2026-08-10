@@ -41,8 +41,11 @@ endpoint and never watches the filesystem, so the state stays stable.
 `tools/screenshots/shots.mjs` and writes `docs/images/*.png` plus the generated
 `docs/demo.md`. Running it in the container keeps fonts, browser build and the
 `/dataroot` paths identical everywhere — screenshots taken on the host would
-differ. Adding a new UI section therefore only means adding one entry to
-`shots.mjs`.
+differ. The container is pinned to `linux/amd64` to match CI; set
+`AFM_SHOT_PLATFORM=linux/arm64` for a faster native preview run. CI is
+authoritative: it regenerates the screenshots on `main` and commits them if its
+rendering differs by a pixel. Adding a new UI section only means adding one
+entry to `shots.mjs`.
 
 `make site` renders `README.md` and `docs/*.md` into the static site in `site/`
 (`tools/site` is a separate Go module so the service keeps its dependency set).

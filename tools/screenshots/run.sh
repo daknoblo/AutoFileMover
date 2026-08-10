@@ -8,13 +8,17 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="mcr.microsoft.com/playwright:v1.62.1-noble"
+# CI renders on linux/amd64; matching it locally keeps the committed PNGs
+# byte-identical (set AFM_SHOT_PLATFORM=linux/arm64 for a faster preview run).
+PLATFORM="${AFM_SHOT_PLATFORM:-linux/amd64}"
 
 cd "$ROOT"
 
 # The demo binary runs inside the Linux container.
-CGO_ENABLED=0 GOOS=linux go build -trimpath -o bin/afm-demo-linux ./cmd/afm-demo
+CGO_ENABLED=0 GOOS=linux GOARCH="${PLATFORM##*/}" go build -trimpath -o bin/afm-demo-linux ./cmd/afm-demo
 
 docker run --rm \
+	--platform "$PLATFORM" \
 	-v "$ROOT":/work \
 	-e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
 	"$IMAGE" bash -c '
