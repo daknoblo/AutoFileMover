@@ -94,6 +94,26 @@ On a confident auto-move the movie is moved, leftovers are deleted and the empty
 source folder is removed; in what-if mode everything can be controlled per file
 beforehand.
 
+### Background queue
+
+File operations never block the interface. Every action that touches the storage
+— "execute plan", a single move/delete, creating a folder, an AI re-check — is
+handed to a background queue and confirmed immediately, so all buttons stay
+usable even while the underlying share is saturated.
+
+The **Queue** tab lists every job with its state, attempt count, next retry and
+error message, and lets you retry or cancel one. A badge in the header shows how
+much work is still outstanding.
+
+If the media root becomes unwritable (share offline, no free IOPS), the queue
+**pauses** instead of failing: jobs are kept, no retry budget is consumed, and
+processing resumes automatically once storage responds again. Transient I/O
+errors are retried with an exponential backoff; errors that can never succeed
+(missing file, no target selected) are marked failed and wait for you.
+
+Because each completed file is persisted immediately, restarting the container
+mid-transfer resumes the plan where it stopped rather than redoing it.
+
 ### Collisions with existing files
 
 Before a file is moved, the service checks the target directory for an

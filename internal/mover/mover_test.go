@@ -1,6 +1,7 @@
 package mover
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +14,7 @@ func TestMoveFileAndCleanup(t *testing.T) {
 	if err := os.WriteFile(file, []byte("data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	final, err := Move(file, dst)
+	final, err := Move(t.Context(), file, dst)
 	if err != nil {
 		t.Fatalf("move: %v", err)
 	}
@@ -30,8 +31,30 @@ func TestMoveRefusesOverwrite(t *testing.T) {
 	a := filepath.Join(src, "x.mkv")
 	_ = os.WriteFile(a, []byte("1"), 0o644)
 	_ = os.WriteFile(filepath.Join(dst, "x.mkv"), []byte("2"), 0o644)
-	if _, err := Move(a, dst); err == nil {
+	if _, err := Move(t.Context(), a, dst); err == nil {
 		t.Fatal("expected collision error")
+	}
+}
+
+// TestCopyCancelledLeavesNoPartialFile covers the cross-filesystem copy path:
+// an aborted transfer must not leave a truncated file behind in the library.
+func TestCopyCancelledLeavesNoPartialFile(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "big.mkv")
+	if err := os.WriteFile(src, make([]byte, 3*copyChunk), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "big.mkv")
+	info, err := os.Lstat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := copyFile(ctx, src, dest, info); err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatal("partial destination file must be removed")
 	}
 }
 
@@ -39,10 +62,10 @@ func TestDeleteAndRemoveIfEmpty(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "junk.nfo")
 	_ = os.WriteFile(f, []byte("x"), 0o644)
-	if err := Delete(f); err != nil {
+	if err := Delete(t.Context(), f); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if err := Delete(f); err != nil {
+	if err := Delete(t.Context(), f); err != nil {
 		t.Fatalf("delete missing should be nil: %v", err)
 	}
 	if err := RemoveIfEmpty(dir); err != nil {
@@ -54,10 +77,10 @@ func TestDeleteAndRemoveIfEmpty(t *testing.T) {
 }
 
 func TestCheckWritable(t *testing.T) {
-	if err := CheckWritable(t.TempDir()); err != nil {
+	if err := CheckWritable(t.Context(), t.TempDir()); err != nil {
 		t.Fatalf("writable dir reported error: %v", err)
 	}
-	if err := CheckWritable(filepath.Join(t.TempDir(), "does-not-exist")); err == nil {
+	if err := CheckWritable(t.Context(), filepath.Join(t.TempDir(), "does-not-exist")); err == nil {
 		t.Fatal("missing dir should report not writable")
 	}
 }
@@ -75,7 +98,7 @@ func TestRemoveEmptyDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RemoveEmptyDirs(rel); err != nil {
+	if err := RemoveEmptyDirs(t.Context(), rel); err != nil {
 		t.Fatalf("remove empty dirs: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(rel, "E01")); !os.IsNotExist(err) {
@@ -93,7 +116,7 @@ func TestRemoveEmptyDirs(t *testing.T) {
 
 	// Remove the remaining file: the whole tree should now be pruned.
 	_ = os.Remove(filepath.Join(rel, "E03", "keep.mkv"))
-	if err := RemoveEmptyDirs(rel); err != nil {
+	if err := RemoveEmptyDirs(t.Context(), rel); err != nil {
 		t.Fatalf("remove empty dirs (2): %v", err)
 	}
 	if _, err := os.Stat(rel); !os.IsNotExist(err) {

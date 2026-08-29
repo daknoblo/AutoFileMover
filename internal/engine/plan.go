@@ -14,15 +14,14 @@ import (
 // ApplyFileAction performs a single planned action (move or delete) for one file
 // inside an item. It is blocked while What-If is enabled.
 func (e *Engine) ApplyFileAction(ctx context.Context, id int64, relPath, action string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
+	item, release, err := e.lockItemByID(ctx, id)
+	if err != nil {
+		return err
 	}
+	defer release()
+
 	if settings, err := e.store.LoadAppSettings(ctx); err == nil && settings.DryRun {
-		return fmt.Errorf("What-If-Modus aktiv: es werden keine Dateien verschoben oder gelöscht")
+		return ErrDryRun
 	}
 	idx := -1
 	for i := range item.Files {
@@ -32,15 +31,21 @@ func (e *Engine) ApplyFileAction(ctx context.Context, id int64, relPath, action 
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("file not found in item")
+		return ErrFileNotFound
 	}
 	e.startPhase(PhaseMoving, 1)
 	defer e.finishProgress()
 	e.updateProgress(0, filepath.Base(relPath))
-	if err := e.execFile(item, &item.Files[idx], action); err != nil {
+	if err := e.execFile(ctx, item, &item.Files[idx], action); err != nil {
+		// Persist regardless so a partially applied change is never lost.
+		item.Status = store.StatusError
+		item.ErrorMessage = err.Error()
+		if uerr := e.store.UpsertItem(ctx, item); uerr != nil {
+			e.log.Error("persist file action error", "id", id, "err", uerr)
+		}
 		return err
 	}
-	e.finalize(item)
+	e.finalize(ctx, item)
 	if !pendingWork(item.Files) {
 		item.Status = store.StatusConfirmed
 		item.ErrorMessage = ""
@@ -55,15 +60,14 @@ func (e *Engine) PlanFileAction(ctx context.Context, id int64, relPath, action s
 	switch action {
 	case store.FileActionMove, store.FileActionDelete, store.FileActionKeep:
 	default:
-		return fmt.Errorf("invalid action")
+		return ErrInvalidAction
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	item, release, err := e.lockItemByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer release()
 
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
-	}
 	idx := -1
 	for i := range item.Files {
 		if item.Files[i].RelPath == relPath {
@@ -72,11 +76,11 @@ func (e *Engine) PlanFileAction(ctx context.Context, id int64, relPath, action s
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("file not found in item")
+		return ErrFileNotFound
 	}
 	f := &item.Files[idx]
 	if f.Done {
-		return fmt.Errorf("file already processed")
+		return ErrFileDone
 	}
 	f.Action = action
 	f.Overwrite = false
@@ -100,8 +104,9 @@ func (e *Engine) PlanFileAction(ctx context.Context, id int64, relPath, action s
 // executePlan runs every undecided move/delete file then cleans up. When
 // reportProgress is true it updates the shared Progress per file so the UI can
 // show the running file operation; the scan path passes false (its own progress
-// already covers it).
-func (e *Engine) executePlan(item *store.Item, reportProgress bool) error {
+// already covers it). Every completed file is persisted immediately so an
+// interrupted multi-file plan resumes exactly where it stopped.
+func (e *Engine) executePlan(ctx context.Context, item *store.Item, reportProgress bool) error {
 	done := 0
 	for i := range item.Files {
 		f := &item.Files[i]
@@ -111,15 +116,21 @@ func (e *Engine) executePlan(item *store.Item, reportProgress bool) error {
 		if reportProgress {
 			e.updateProgress(done, filepath.Base(f.RelPath))
 		}
-		if err := e.execFile(item, f, f.Action); err != nil {
+		if err := e.execFile(ctx, item, f, f.Action); err != nil {
+			if uerr := e.store.UpsertItem(ctx, item); uerr != nil {
+				e.log.Error("persist partial plan", "item", item.Name, "err", uerr)
+			}
 			return err
 		}
 		done++
+		if uerr := e.store.UpsertItem(ctx, item); uerr != nil {
+			e.log.Error("persist plan progress", "item", item.Name, "err", uerr)
+		}
 	}
 	if reportProgress {
 		e.updateProgress(done, "")
 	}
-	e.finalize(item)
+	e.finalize(ctx, item)
 	return nil
 }
 
@@ -135,7 +146,7 @@ func countPending(files []store.File) int {
 }
 
 // execFile moves or deletes a single file and marks it done.
-func (e *Engine) execFile(item *store.Item, f *store.File, action string) error {
+func (e *Engine) execFile(ctx context.Context, item *store.Item, f *store.File, action string) error {
 	src := filepath.Join(item.SourcePath, f.RelPath)
 	if item.IsSingleFile() {
 		src = item.SourcePath
@@ -147,7 +158,7 @@ func (e *Engine) execFile(item *store.Item, f *store.File, action string) error 
 			dest = filepath.Join(item.TargetPath, filepath.Base(f.RelPath))
 		}
 		if dest == "" {
-			return fmt.Errorf("kein Zielordner für %s", f.RelPath)
+			return fmt.Errorf("%w: %s", ErrNoTarget, f.RelPath)
 		}
 		if f.Overwrite {
 			// The user chose to replace a colliding target file: remove it first
@@ -157,12 +168,12 @@ func (e *Engine) execFile(item *store.Item, f *store.File, action string) error 
 			if rm == "" {
 				rm = dest
 			}
-			if err := mover.Delete(rm); err != nil {
+			if err := mover.Delete(ctx, rm); err != nil {
 				return fmt.Errorf("vorhandene Datei ersetzen: %w", err)
 			}
 			e.log.Info("replacing existing target", "removed", rm, "dest", dest)
 		}
-		if _, err := mover.Move(src, filepath.Dir(dest)); err != nil {
+		if _, err := mover.Move(ctx, src, filepath.Dir(dest)); err != nil {
 			return err
 		}
 		f.TargetPath = dest
@@ -171,12 +182,12 @@ func (e *Engine) execFile(item *store.Item, f *store.File, action string) error 
 		f.Conflict = nil
 		e.log.Info("moved file", "file", f.RelPath, "dest", dest)
 	case store.FileActionDelete:
-		if err := mover.Delete(src); err != nil {
+		if err := mover.Delete(ctx, src); err != nil {
 			return err
 		}
 		e.log.Info("deleted file", "file", src)
 	default:
-		return fmt.Errorf("nichts zu tun für %s", f.RelPath)
+		return fmt.Errorf("%w: %s", ErrInvalidAction, f.RelPath)
 	}
 	f.Action = action
 	f.Done = true
@@ -187,12 +198,14 @@ func (e *Engine) execFile(item *store.Item, f *store.File, action string) error 
 // directories that became empty (e.g. the per-episode sub-folders of a season
 // pack whose videos were moved out) are removed, and the source folder itself
 // if it ends up empty.
-func (e *Engine) finalize(item *store.Item) {
+func (e *Engine) finalize(ctx context.Context, item *store.Item) {
 	if pendingWork(item.Files) {
 		return // work remaining
 	}
 	if !item.IsSingleFile() {
-		_ = mover.RemoveEmptyDirs(item.SourcePath)
+		if err := mover.RemoveEmptyDirs(ctx, item.SourcePath); err != nil {
+			e.log.Warn("cleanup source folder", "path", item.SourcePath, "err", err)
+		}
 	}
 }
 

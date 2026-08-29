@@ -22,12 +22,11 @@ type Engine struct {
 	store *store.Store
 	cfg   config.Config
 	log   *slog.Logger
-	// mu serializes an individual item mutation (one scan candidate or one user
-	// action). It is held per-candidate during a scan — never for the whole
-	// scan — so quick user actions can interleave between candidates.
-	mu sync.Mutex
+	// locks serializes work per item (keyed by source path) so a slow scan,
+	// AI call or file operation on one item never blocks actions on another.
+	locks *itemLocks
 	// scanMu serializes whole scans against each other without blocking the
-	// per-item mu, so at most one ProcessSource runs at a time.
+	// per-item locks, so at most one ProcessSource runs at a time.
 	scanMu sync.Mutex
 
 	progMu sync.Mutex
@@ -36,7 +35,7 @@ type Engine struct {
 
 // New creates a new engine.
 func New(st *store.Store, cfg config.Config, log *slog.Logger) *Engine {
-	return &Engine{store: st, cfg: cfg, log: log}
+	return &Engine{store: st, cfg: cfg, log: log, locks: newItemLocks()}
 }
 
 // scanContext caches the per-scan inputs that would otherwise be re-loaded from
@@ -44,9 +43,9 @@ func New(st *store.Store, cfg config.Config, log *slog.Logger) *Engine {
 // settings, the target libraries and a single reusable AI client. Folder notes
 // and each library's sub-folder listing are loaded lazily on first use, so a
 // scan that classifies nothing pays no extra I/O. A scanContext is used by a
-// single goroutine at a time (the scan holds e.mu), so it needs no lock. No
-// code path creates a new library sub-folder during a scan, which keeps the
-// memoized sub-folder listing consistent for the whole scan.
+// single goroutine at a time (scans are serialized by e.scanMu), so it needs no
+// lock. No code path creates a new library sub-folder during a scan, which keeps
+// the memoized sub-folder listing consistent for the whole scan.
 type scanContext struct {
 	settings store.AppSettings
 	libs     []store.Library
@@ -133,9 +132,8 @@ func (e *Engine) ProcessAll(ctx context.Context) {
 
 // ProcessSource scans a single source folder and processes stable candidates.
 func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
-	// Serialize scans against each other, but do NOT hold e.mu for the whole
-	// scan: it is taken per-candidate below so quick user actions can run
-	// between candidates instead of waiting for the entire scan to finish.
+	// Serialize scans against each other. Individual candidates take their own
+	// per-item lock below, so user actions on other items never wait for a scan.
 	e.scanMu.Lock()
 	defer e.scanMu.Unlock()
 
@@ -163,9 +161,15 @@ func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
 			e.log.Info("candidate not yet stable, skipping", "name", c.Name)
 			continue
 		}
-		e.mu.Lock()
+		if c.SkippedFiles > 0 {
+			e.log.Warn("candidate listing incomplete", "name", c.Name, "skipped", c.SkippedFiles)
+		}
+		release, lerr := e.locks.acquire(ctx, c.Path)
+		if lerr != nil {
+			return
+		}
 		perr := e.processCandidate(ctx, sc, c, sourcePath)
-		e.mu.Unlock()
+		release()
 		if perr != nil {
 			e.log.Error("process candidate", "path", c.Path, "err", perr)
 		}
@@ -202,7 +206,7 @@ func (e *Engine) processCandidate(ctx context.Context, sc *scanContext, c scanne
 			// files at all (only the empty sub-folders left behind after its
 			// videos were moved out), clean those leftovers up.
 			if len(c.Files) == 0 && !settings.DryRun {
-				if err := mover.RemoveEmptyDirs(c.Path); err != nil {
+				if err := mover.RemoveEmptyDirs(ctx, c.Path); err != nil {
 					e.log.Warn("cleanup empty leftover", "path", c.Path, "err", err)
 				} else {
 					e.log.Info("removed empty leftover folder", "path", c.Path)
@@ -302,7 +306,7 @@ func (e *Engine) processCandidate(ctx context.Context, sc *scanContext, c scanne
 	if err := e.store.UpsertItem(ctx, item); err != nil {
 		return err
 	}
-	if err := e.executePlan(item, false); err != nil {
+	if err := e.executePlan(ctx, item, false); err != nil {
 		item.Status = store.StatusError
 		item.ErrorMessage = err.Error()
 		return e.store.UpsertItem(ctx, item)
@@ -316,31 +320,30 @@ func (e *Engine) processCandidate(ctx context.Context, sc *scanContext, c scanne
 // ApplyPlan carries out every planned move/delete for an item, then removes the
 // emptied source folder. Used by the "Alles ausführen" button after review.
 func (e *Engine) ApplyPlan(ctx context.Context, id int64) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
+	item, release, err := e.lockItemByID(ctx, id)
+	if err != nil {
+		return err
 	}
+	defer release()
+
 	if settings, err := e.store.LoadAppSettings(ctx); err == nil && settings.DryRun {
-		return fmt.Errorf("What-If-Modus aktiv: es werden keine Dateien verschoben oder gelöscht")
+		return ErrDryRun
 	}
 	if !pendingWork(item.Files) {
-		return fmt.Errorf("nichts auszuführen")
+		return ErrNothingToDo
 	}
 	if anyUnresolvedMove(item.Files) {
-		return fmt.Errorf("kein Ziel aufgelöst – bitte zuerst eine Bibliothek/Datei wählen")
+		return ErrNoTarget
 	}
 	if anyUnresolvedConflict(item.Files) {
-		return fmt.Errorf("Konflikt mit vorhandener Datei – bitte zuerst auflösen (Ersetzen oder Vorhandene behalten)")
+		return ErrUnresolvedConflict
 	}
 	if uerr := e.store.UpdateItemStatus(ctx, id, store.StatusMoving, ""); uerr != nil {
 		e.log.Warn("update status to moving", "id", id, "err", uerr)
 	}
 	e.startPhase(PhaseMoving, countPending(item.Files))
 	defer e.finishProgress()
-	if err := e.executePlan(item, true); err != nil {
+	if err := e.executePlan(ctx, item, true); err != nil {
 		if uerr := e.store.UpdateItemStatus(ctx, id, store.StatusError, err.Error()); uerr != nil {
 			e.log.Error("persist plan error", "id", id, "err", uerr)
 		}
@@ -356,13 +359,12 @@ func (e *Engine) ApplyPlan(ctx context.Context, id int64) error {
 // updates the suggested per-file actions and target WITHOUT executing anything.
 // Progress is reported on the same status channel as a scan.
 func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
+	item, release, err := e.lockItemByID(ctx, id)
+	if err != nil {
+		return err
 	}
+	defer release()
+
 	hasReal := false
 	for _, f := range item.Files {
 		if f.RelPath != "" {
@@ -371,7 +373,7 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 		}
 	}
 	if !hasReal {
-		return fmt.Errorf("nichts zu analysieren")
+		return ErrNothingToClassify
 	}
 
 	sc, err := e.newScanContext(ctx)
@@ -379,7 +381,7 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 		return err
 	}
 	if !sc.client.Configured() {
-		return fmt.Errorf("KI-Endpoint nicht konfiguriert")
+		return ErrAINotConfigured
 	}
 
 	e.beginScan()

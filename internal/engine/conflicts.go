@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,13 +114,12 @@ func (e *Engine) RejectItem(ctx context.Context, id int64) error {
 //
 // Either way the conflict is cleared so the plan can be applied.
 func (e *Engine) ResolveConflict(ctx context.Context, id int64, relPath, resolution string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
+	item, release, err := e.lockItemByID(ctx, id)
+	if err != nil {
+		return err
 	}
+	defer release()
+
 	idx := -1
 	for i := range item.Files {
 		if item.Files[i].RelPath == relPath {
@@ -130,11 +128,11 @@ func (e *Engine) ResolveConflict(ctx context.Context, id int64, relPath, resolut
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("file not found in item")
+		return ErrFileNotFound
 	}
 	f := &item.Files[idx]
 	if f.Conflict == nil {
-		return fmt.Errorf("kein Konflikt für diese Datei")
+		return ErrNoConflict
 	}
 	switch resolution {
 	case "replace":
@@ -149,7 +147,7 @@ func (e *Engine) ResolveConflict(ctx context.Context, id int64, relPath, resolut
 		f.OverwritePath = ""
 		f.Conflict = nil
 	default:
-		return fmt.Errorf("invalid resolution")
+		return ErrInvalidResolution
 	}
 	e.log.Info("conflict resolved", "item", item.Name, "file", relPath, "resolution", resolution)
 	return e.store.UpsertItem(ctx, item)

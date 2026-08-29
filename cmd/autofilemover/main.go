@@ -20,6 +20,7 @@ import (
 	"github.com/daknoblo/AutoFileMover/internal/config"
 	"github.com/daknoblo/AutoFileMover/internal/engine"
 	"github.com/daknoblo/AutoFileMover/internal/logbuf"
+	"github.com/daknoblo/AutoFileMover/internal/queue"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 	"github.com/daknoblo/AutoFileMover/internal/version"
 	"github.com/daknoblo/AutoFileMover/internal/watcher"
@@ -62,8 +63,9 @@ func main() {
 	}
 
 	eng := engine.New(st, cfg, log)
+	q := queue.New(st, eng, cfg, log)
 	w := watcher.New(st, eng, log, 3*time.Second)
-	srv := web.NewServer(st, eng, cfg, log, w, logs, levelVar)
+	srv := web.NewServer(st, eng, q, cfg, log, w, logs, levelVar)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -72,6 +74,16 @@ func main() {
 	go func() {
 		if err := w.Run(ctx, cfg.ScanInterval); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("watcher stopped", "err", err)
+		}
+	}()
+
+	// Start the background queue that executes all filesystem work, so no HTTP
+	// request ever waits on the media storage.
+	queueDone := make(chan struct{})
+	go func() {
+		defer close(queueDone)
+		if err := q.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Error("queue worker stopped", "err", err)
 		}
 	}()
 
@@ -99,6 +111,13 @@ func main() {
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Error("http shutdown", "err", err)
+	}
+	// Let the queue finish its current step; an unfinished job is written back
+	// as pending and resumes on the next start.
+	select {
+	case <-queueDone:
+	case <-shutdownCtx.Done():
+		log.Warn("queue worker did not stop in time")
 	}
 }
 

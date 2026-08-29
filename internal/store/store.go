@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -153,6 +154,11 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// The database holds the AI API key in clear text, so keep it owner-only.
+	if err := os.Chmod(path, 0o600); err != nil && !os.IsNotExist(err) {
+		_ = db.Close()
+		return nil, fmt.Errorf("restrict db permissions: %w", err)
+	}
 	return s, nil
 }
 
@@ -203,6 +209,23 @@ CREATE TABLE IF NOT EXISTS folder_notes (
 	description TEXT NOT NULL DEFAULT '',
 	updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS jobs (
+	id           INTEGER PRIMARY KEY AUTOINCREMENT,
+	item_id      INTEGER NOT NULL,
+	kind         TEXT NOT NULL,
+	payload_json TEXT NOT NULL DEFAULT '{}',
+	status       TEXT NOT NULL,
+	attempts     INTEGER NOT NULL DEFAULT 0,
+	last_error   TEXT NOT NULL DEFAULT '',
+	run_after    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_status_run_after ON jobs(status, run_after);
+CREATE INDEX IF NOT EXISTS idx_jobs_item ON jobs(item_id);
+-- One outstanding job per item+kind+payload: a double click enqueues once.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_open_unique
+	ON jobs(item_id, kind, payload_json) WHERE status IN ('pending', 'running');
 `
 	_, err := s.db.Exec(schema)
 	if err != nil {
@@ -454,11 +477,16 @@ ON CONFLICT(source_path) DO UPDATE SET
 		if id, e := res.LastInsertId(); e == nil && id != 0 {
 			it.ID = id
 		} else {
-			// On conflict-update LastInsertId may be 0; re-read the id.
-			existing, _ := s.FindItemBySource(ctx, it.SourcePath)
-			if existing != nil {
-				it.ID = existing.ID
+			// On conflict-update LastInsertId may be 0; re-read the id. Losing it
+			// here would silently detach the caller's item from its row.
+			existing, ferr := s.FindItemBySource(ctx, it.SourcePath)
+			if ferr != nil {
+				return fmt.Errorf("upsert item: resolve id: %w", ferr)
 			}
+			if existing == nil {
+				return fmt.Errorf("upsert item: row for %s disappeared", it.SourcePath)
+			}
+			it.ID = existing.ID
 		}
 	}
 	return nil
@@ -503,7 +531,13 @@ func scanItem(row scanner) (*Item, error) {
 		return nil, err
 	}
 	if filesJSON != "" {
-		_ = json.Unmarshal([]byte(filesJSON), &it.Files)
+		if err := json.Unmarshal([]byte(filesJSON), &it.Files); err != nil {
+			// Surface the damage instead of presenting the item as file-less,
+			// which would look like an empty folder in the review queue.
+			it.Files = nil
+			it.Status = StatusError
+			it.ErrorMessage = fmt.Sprintf("gespeicherte Dateiliste ist beschädigt: %v", err)
+		}
 	}
 	return &it, nil
 }

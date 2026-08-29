@@ -3,7 +3,10 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -16,19 +19,83 @@ import (
 	"github.com/daknoblo/AutoFileMover/internal/engine"
 	"github.com/daknoblo/AutoFileMover/internal/logbuf"
 	"github.com/daknoblo/AutoFileMover/internal/mediainfo"
-	"github.com/daknoblo/AutoFileMover/internal/mover"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 	"github.com/daknoblo/AutoFileMover/internal/version"
 )
 
+// itemActionTimeout bounds how long a database-only item action waits for the
+// item lock. Exceeding it means the worker or a scan currently owns the item,
+// which the UI shows as "busy" instead of letting the request hang.
+const itemActionTimeout = 2 * time.Second
+
+// fsReadTimeout bounds directory listings so a stalled share fails fast with a
+// clear message instead of running into the server's write timeout.
+const fsReadTimeout = 5 * time.Second
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Debug("write json response", "err", err)
+	}
 }
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// writeItemErr maps an engine error onto a status code. A busy item is a
+// temporary condition the UI retries, not a client mistake.
+func writeItemErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, engine.ErrItemBusy), errors.Is(err, context.DeadlineExceeded):
+		writeErr(w, http.StatusConflict, engine.ErrItemBusy.Error())
+	case errors.Is(err, engine.ErrItemNotFound):
+		writeErr(w, http.StatusNotFound, err.Error())
+	default:
+		writeErr(w, http.StatusBadRequest, err.Error())
+	}
+}
+
+// writeFSErr reports a storage read that timed out as 503 so the UI can tell a
+// slow share apart from a genuine error.
+func writeFSErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		writeErr(w, http.StatusServiceUnavailable, "Speicher antwortet nicht rechtzeitig – bitte erneut versuchen")
+		return
+	}
+	writeErr(w, http.StatusInternalServerError, err.Error())
+}
+
+// itemActionContext bounds a database-only item action so it never blocks on a
+// long-running operation for the same item.
+func (s *Server) itemActionContext(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(r.Context(), itemActionTimeout)
+}
+
+// withFSDeadline runs a blocking filesystem read on its own goroutine and gives
+// up after fsReadTimeout. The goroutine finishes on its own; it only writes to
+// its private channel, so an abandoned call leaks nothing.
+func withFSDeadline[T any](parent context.Context, fn func() (T, error)) (T, error) {
+	ctx, cancel := context.WithTimeout(parent, fsReadTimeout)
+	defer cancel()
+
+	type result struct {
+		val T
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		v, err := fn()
+		done <- result{v, err}
+	}()
+	select {
+	case res := <-done:
+		return res.val, res.err
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
+	}
 }
 
 func pathID(r *http.Request) (int64, error) {
@@ -107,39 +174,32 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 
 // ---- Scan status ----
 
-// statusDTO combines scan progress with a filesystem-writability indicator.
+// statusDTO combines scan progress, the storage health probe and the queue
+// counters the header badge shows.
 type statusDTO struct {
 	engine.Progress
-	FSWritable bool   `json:"fs_writable"`
-	FSMessage  string `json:"fs_message"`
+	FSWritable   bool   `json:"fs_writable"`
+	FSMessage    string `json:"fs_message"`
+	QueuePending int    `json:"queue_pending"`
+	QueueRunning int    `json:"queue_running"`
+	QueueFailed  int    `json:"queue_failed"`
+	QueuePaused  bool   `json:"queue_paused"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	ok, msg := s.fsWritable()
-	writeJSON(w, http.StatusOK, statusDTO{
-		Progress:   s.engine.GetProgress(),
-		FSWritable: ok,
-		FSMessage:  msg,
-	})
-}
-
-// fsWritable probes whether the media root accepts create/move/delete, caching
-// the result for a few seconds so the frequently-polled status stays cheap.
-func (s *Server) fsWritable() (bool, string) {
-	s.fsMu.Lock()
-	defer s.fsMu.Unlock()
-	if !s.fsCheckedAt.IsZero() && time.Since(s.fsCheckedAt) < 10*time.Second {
-		return s.fsOK, s.fsMsg
+	health, paused := s.queue.Health()
+	dto := statusDTO{
+		Progress:    s.engine.GetProgress(),
+		FSWritable:  health.Writable,
+		FSMessage:   health.Message,
+		QueuePaused: paused,
 	}
-	err := mover.CheckWritable(s.cfg.MediaRoot)
-	s.fsCheckedAt = time.Now()
-	s.fsOK = err == nil
-	if err != nil {
-		s.fsMsg = err.Error()
+	if counts, err := s.store.CountJobs(r.Context()); err != nil {
+		s.log.Warn("count jobs", "err", err)
 	} else {
-		s.fsMsg = ""
+		dto.QueuePending, dto.QueueRunning, dto.QueueFailed = counts.Pending, counts.Running, counts.Failed
 	}
-	return s.fsOK, s.fsMsg
+	writeJSON(w, http.StatusOK, dto)
 }
 
 // ---- Settings ----
@@ -367,21 +427,38 @@ func (s *Server) handleLibraryFolders(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "library not found")
 		return
 	}
-	entries, err := os.ReadDir(lib.Path)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	folders := []string{}
-	for _, e := range entries {
-		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-			folders = append(folders, e.Name())
+	folders, err := withFSDeadline(r.Context(), func() ([]string, error) {
+		entries, rerr := os.ReadDir(lib.Path)
+		if rerr != nil {
+			return nil, rerr
 		}
+		out := []string{}
+		for _, e := range entries {
+			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+				out = append(out, e.Name())
+			}
+		}
+		return out, nil
+	})
+	if err != nil {
+		writeFSErr(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, folders)
 }
 
 // ---- Items ----
+
+// itemDTO is an item plus the state of its outstanding queue job, so a review
+// card can show "queued", "running" or "failed" without an extra request.
+type itemDTO struct {
+	store.Item
+	QueueState   string `json:"queue_state,omitempty"`
+	QueueKind    string `json:"queue_kind,omitempty"`
+	QueueError   string `json:"queue_error,omitempty"`
+	QueueAttempt int    `json:"queue_attempt,omitempty"`
+	QueueRetryIn int    `json:"queue_retry_in,omitempty"`
+}
 
 func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
@@ -390,19 +467,63 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if items == nil {
-		items = []store.Item{}
+	jobs, err := s.store.OpenJobsByItem(r.Context())
+	if err != nil {
+		s.log.Warn("load open jobs", "err", err)
+		jobs = map[int64]store.Job{}
 	}
-	// Enrich every file with a quality summary derived from its name so the UI
-	// can always show resolution/codec/source next to the size.
+	out := make([]itemDTO, 0, len(items))
 	for i := range items {
+		// Enrich every file with a quality summary derived from its name so the
+		// UI can always show resolution/codec/source next to the size.
 		for j := range items[i].Files {
 			if items[i].Files[j].RelPath != "" {
 				items[i].Files[j].Quality = mediainfo.Parse(items[i].Files[j].RelPath).Summary()
 			}
 		}
+		dto := itemDTO{Item: items[i]}
+		if job, ok := jobs[items[i].ID]; ok {
+			dto.QueueState = job.Status
+			dto.QueueKind = job.Kind
+			dto.QueueError = job.LastError
+			dto.QueueAttempt = job.Attempts
+			if job.Status == store.JobPending && job.Attempts > 0 {
+				if wait := int(time.Until(job.RunAfter).Seconds()); wait > 0 {
+					dto.QueueRetryIn = wait
+				}
+			}
+		}
+		out = append(out, dto)
 	}
-	writeJSON(w, http.StatusOK, items)
+	writeJSON(w, http.StatusOK, out)
+}
+
+// enqueue records a filesystem action for the background worker and answers
+// immediately. Nothing in the request path touches the storage, so the UI stays
+// responsive even while the share is saturated.
+func (s *Server) enqueue(w http.ResponseWriter, r *http.Request, id int64, kind string, payload store.JobPayload) {
+	// GetItem reports a missing row as (nil, nil), so the value must be checked
+	// as well or a job would be queued for an item that no longer exists.
+	item, err := s.store.GetItem(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if item == nil {
+		writeErr(w, http.StatusNotFound, engine.ErrItemNotFound.Error())
+		return
+	}
+	job, err := s.store.EnqueueJob(r.Context(), id, kind, payload)
+	if errors.Is(err, store.ErrJobExists) {
+		writeJSON(w, http.StatusAccepted, map[string]any{"queued": true, "duplicate": true})
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.queue.Notify()
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true, "job_id": job.ID})
 }
 
 func (s *Server) handleConfirmItem(w http.ResponseWriter, r *http.Request) {
@@ -411,11 +532,7 @@ func (s *Server) handleConfirmItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.engine.ApplyPlan(r.Context(), id); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "applied"})
+	s.enqueue(w, r, id, store.JobApplyPlan, store.JobPayload{})
 }
 
 // handleSetItemTarget assigns a target library (and optional series sub-folder)
@@ -438,14 +555,16 @@ func (s *Server) handleSetItemTarget(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "library_id is required")
 		return
 	}
-	if err := s.engine.SetItemTarget(r.Context(), id, body.LibraryID, strings.TrimSpace(body.SubFolder)); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	ctx, cancel := s.itemActionContext(r)
+	defer cancel()
+	if err := s.engine.SetItemTarget(ctx, id, body.LibraryID, strings.TrimSpace(body.SubFolder)); err != nil {
+		writeItemErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleFileAction runs a single file's move/delete, also when What-If is on.
+// handleFileAction queues a single file's move/delete for the background worker.
 func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
@@ -460,11 +579,7 @@ func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if err := s.engine.ApplyFileAction(r.Context(), id, body.RelPath, body.Action); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "done"})
+	s.enqueue(w, r, id, store.JobFileAction, store.JobPayload{RelPath: body.RelPath, Action: body.Action})
 }
 
 // handlePlanFileAction sets the planned action for a single file without
@@ -483,8 +598,10 @@ func (s *Server) handlePlanFileAction(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if err := s.engine.PlanFileAction(r.Context(), id, body.RelPath, body.Action); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	ctx, cancel := s.itemActionContext(r)
+	defer cancel()
+	if err := s.engine.PlanFileAction(ctx, id, body.RelPath, body.Action); err != nil {
+		writeItemErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "planned"})
@@ -507,32 +624,29 @@ func (s *Server) handleResolveConflict(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if err := s.engine.ResolveConflict(r.Context(), id, body.RelPath, body.Resolution); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	ctx, cancel := s.itemActionContext(r)
+	defer cancel()
+	if err := s.engine.ResolveConflict(ctx, id, body.RelPath, body.Resolution); err != nil {
+		writeItemErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
 }
 
-// handleReclassifyItem re-runs the AI classification for one item and updates
-// the suggested per-file actions without executing anything.
+// handleReclassifyItem queues a fresh AI classification for one item.
 func (s *Server) handleReclassifyItem(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.engine.ReclassifyItem(r.Context(), id); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "reclassified"})
+	s.enqueue(w, r, id, store.JobReclassify, store.JobPayload{})
 }
 
-// handleCreateItemFolder creates a destination folder for an item and sets it as
-// the move target. With no body it creates the AI-suggested folder; with a
-// {library_id, folder} body it creates a folder named by the user under that
-// library (manual review when the desired folder does not exist yet).
+// handleCreateItemFolder queues creation of a destination folder for an item.
+// With no body it creates the AI-suggested folder; with a {library_id, folder}
+// body it creates a folder named by the user under that library (manual review
+// when the desired folder does not exist yet).
 func (s *Server) handleCreateItemFolder(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
@@ -543,22 +657,21 @@ func (s *Server) handleCreateItemFolder(w http.ResponseWriter, r *http.Request) 
 		LibraryID int64  `json:"library_id"`
 		Folder    string `json:"folder"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&body) // body is optional (suggested-folder case sends none)
-	folder := strings.TrimSpace(body.Folder)
-	if folder != "" {
-		if body.LibraryID == 0 {
-			writeErr(w, http.StatusBadRequest, "library_id is required")
-			return
-		}
-		if err := s.engine.CreateNamedTargetFolder(r.Context(), id, body.LibraryID, folder); err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	} else if err := s.engine.CreateTargetFolder(r.Context(), id); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	// The suggested-folder case sends no body at all; anything else must parse.
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "created"})
+	folder := strings.TrimSpace(body.Folder)
+	if folder != "" && body.LibraryID == 0 {
+		writeErr(w, http.StatusBadRequest, "library_id is required")
+		return
+	}
+	payload := store.JobPayload{Folder: folder}
+	if folder != "" {
+		payload.LibraryID = body.LibraryID
+	}
+	s.enqueue(w, r, id, store.JobCreateFolder, payload)
 }
 
 func (s *Server) handleRejectItem(w http.ResponseWriter, r *http.Request) {
@@ -683,9 +796,11 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	dirEntries, err := os.ReadDir(clean)
+	dirEntries, err := withFSDeadline(r.Context(), func() ([]os.DirEntry, error) {
+		return os.ReadDir(clean)
+	})
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeFSErr(w, err)
 		return
 	}
 	entries := []browseEntry{}
@@ -708,6 +823,64 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		AtRoot:  atRoot,
 		Entries: entries,
 	})
+}
+
+// ---- Queue ----
+
+// queueResponse is the payload of the queue tab: the jobs plus the storage
+// health that decides whether the worker may run at all.
+type queueResponse struct {
+	Jobs    []store.Job     `json:"jobs"`
+	Counts  store.JobCounts `json:"counts"`
+	Paused  bool            `json:"paused"`
+	Message string          `json:"message"`
+}
+
+func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
+	jobs, err := s.store.ListJobs(r.Context(), 200)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	counts, err := s.store.CountJobs(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	health, paused := s.queue.Health()
+	writeJSON(w, http.StatusOK, queueResponse{
+		Jobs:    jobs,
+		Counts:  counts,
+		Paused:  paused,
+		Message: health.Message,
+	})
+}
+
+func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.store.RetryJob(r.Context(), id); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.queue.Notify()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+}
+
+func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.store.DeleteJob(r.Context(), id); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleListFolderNotes(w http.ResponseWriter, r *http.Request) {

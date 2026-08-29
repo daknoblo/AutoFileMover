@@ -7,12 +7,11 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"sync"
-	"time"
 
 	"github.com/daknoblo/AutoFileMover/internal/config"
 	"github.com/daknoblo/AutoFileMover/internal/engine"
 	"github.com/daknoblo/AutoFileMover/internal/logbuf"
+	"github.com/daknoblo/AutoFileMover/internal/queue"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 )
 
@@ -29,22 +28,17 @@ type Resyncer interface {
 type Server struct {
 	store    *store.Store
 	engine   *engine.Engine
+	queue    *queue.Worker
 	cfg      config.Config
 	log      *slog.Logger
 	resyncer Resyncer
 	logs     *logbuf.Buffer
 	level    *slog.LevelVar
-
-	// Cached filesystem-writability probe (refreshed at most every few seconds).
-	fsMu        sync.Mutex
-	fsCheckedAt time.Time
-	fsOK        bool
-	fsMsg       string
 }
 
 // NewServer creates the HTTP server.
-func NewServer(st *store.Store, eng *engine.Engine, cfg config.Config, log *slog.Logger, resyncer Resyncer, logs *logbuf.Buffer, level *slog.LevelVar) *Server {
-	return &Server{store: st, engine: eng, cfg: cfg, log: log, resyncer: resyncer, logs: logs, level: level}
+func NewServer(st *store.Store, eng *engine.Engine, q *queue.Worker, cfg config.Config, log *slog.Logger, resyncer Resyncer, logs *logbuf.Buffer, level *slog.LevelVar) *Server {
+	return &Server{store: st, engine: eng, queue: q, cfg: cfg, log: log, resyncer: resyncer, logs: logs, level: level}
 }
 
 // Handler builds the http.Handler with all routes.
@@ -82,6 +76,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/scan", s.handleScan)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("PUT /api/dry-run", s.handleSetDryRun)
+
+	// Background queue for filesystem work.
+	mux.HandleFunc("GET /api/queue", s.handleListQueue)
+	mux.HandleFunc("POST /api/queue/{id}/retry", s.handleRetryJob)
+	mux.HandleFunc("DELETE /api/queue/{id}", s.handleDeleteJob)
 
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/log-level", s.handleGetLogLevel)

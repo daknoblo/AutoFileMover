@@ -21,6 +21,9 @@ type Candidate struct {
 	IsDir bool
 	// Files lists the contained files (for a single file: the file itself).
 	Files []store.File
+	// SkippedFiles counts entries that could not be read (permissions, broken
+	// symlinks). A non-zero value means Files is an incomplete listing.
+	SkippedFiles int
 	// LastModified is the most recent modification time within the entry.
 	LastModified time.Time
 }
@@ -92,18 +95,27 @@ func inspect(path string, isDir bool) (Candidate, error) {
 	}
 
 	var latest time.Time
+	var skipped int
 	err := filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // ignore traversal errors on individual entries
+			// Keep scanning the rest of the folder, but count what was missed so
+			// the caller can report an incomplete listing.
+			skipped++
+			return nil
 		}
 		if d.IsDir() {
 			return nil
 		}
 		info, err := d.Info()
 		if err != nil {
+			skipped++
 			return nil
 		}
-		rel, _ := filepath.Rel(path, p)
+		rel, relErr := filepath.Rel(path, p)
+		if relErr != nil {
+			skipped++
+			return nil
+		}
 		c.Files = append(c.Files, store.File{
 			RelPath: rel,
 			Size:    info.Size(),
@@ -114,6 +126,7 @@ func inspect(path string, isDir bool) (Candidate, error) {
 		}
 		return nil
 	})
+	c.SkippedFiles = skipped
 	// An empty folder has no files to derive a modification time from; fall back
 	// to the folder's own mod time so it still counts as stable and is surfaced
 	// as a (deletable) queue entry.
