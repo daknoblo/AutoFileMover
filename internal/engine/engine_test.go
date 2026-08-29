@@ -270,7 +270,7 @@ func TestDetectAndReplaceConflict(t *testing.T) {
 		t.Fatalf("replace decision not recorded: %+v", got.Files[0])
 	}
 
-	if err := eng.execFile(got, &got.Files[0], store.FileActionMove); err != nil {
+	if err := eng.execFile(t.Context(), got, &got.Files[0], store.FileActionMove); err != nil {
 		t.Fatalf("execFile move: %v", err)
 	}
 	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
@@ -332,7 +332,7 @@ func TestResolveConflictKeep(t *testing.T) {
 		t.Fatalf("keep decision not recorded: %+v", got.Files[0])
 	}
 
-	if err := eng.execFile(got, &got.Files[0], store.FileActionDelete); err != nil {
+	if err := eng.execFile(t.Context(), got, &got.Files[0], store.FileActionDelete); err != nil {
 		t.Fatalf("execFile delete: %v", err)
 	}
 	if _, err := os.Stat(existing); err != nil {
@@ -496,9 +496,10 @@ func TestSetItemTargetRoutesFilesToMove(t *testing.T) {
 		Name:       "Movie",
 		Status:     store.StatusError,
 		Files: []store.File{
-			{RelPath: "movie.mkv"},                                  // undecided -> move
-			{RelPath: "sample.mkv", Action: store.FileActionDelete}, // explicit delete preserved
-			{RelPath: "extras.mkv", Action: store.FileActionKeep},   // explicit keep preserved
+			// Undecided files are routed to "move"; explicit choices are kept.
+			{RelPath: "movie.mkv"},
+			{RelPath: "sample.mkv", Action: store.FileActionDelete},
+			{RelPath: "extras.mkv", Action: store.FileActionKeep},
 		},
 	}
 	if err := st.UpsertItem(ctx, item); err != nil {

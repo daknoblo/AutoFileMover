@@ -16,30 +16,29 @@ import (
 // recomputed destination, and undecided files (e.g. a folder the AI never
 // classified) are switched to "move". Explicit delete/keep choices are kept.
 func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFolder string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
+	item, release, err := e.lockItemByID(ctx, id)
+	if err != nil {
+		return err
 	}
+	defer release()
+
 	lib, err := e.store.GetLibrary(ctx, libraryID)
 	if err != nil {
-		return fmt.Errorf("library not found")
+		return ErrLibraryNotFound
 	}
 	destDir := lib.Path
 	if subFolder != "" {
 		// User input: this endpoint accepts exactly one existing folder name,
 		// not a nested path. Reject separators and ".." sequences up front.
 		if strings.Contains(subFolder, "/") || strings.Contains(subFolder, "\\") || strings.Contains(subFolder, "..") {
-			return fmt.Errorf("ungültiger Zielordner: %s", subFolder)
+			return fmt.Errorf("%w: %s", ErrInvalidFolderName, subFolder)
 		}
 		destDir = filepath.Join(lib.Path, subFolder)
 	}
 	// Keep the destination inside the library: reject a sub-folder that escapes
 	// lib.Path via ".." (filepath.Rel yields a ".." prefix in that case).
 	if rel, relErr := filepath.Rel(lib.Path, destDir); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return fmt.Errorf("ungültiger Zielordner: %s", subFolder)
+		return fmt.Errorf("%w: %s", ErrInvalidFolderName, subFolder)
 	}
 	if info, err := os.Stat(destDir); err != nil || !info.IsDir() {
 		return fmt.Errorf("Zielordner existiert nicht: %s", destDir)
@@ -134,19 +133,18 @@ func sanitizeFolder(title string) string {
 // CreateTargetFolder creates the AI-suggested destination folder for an item and
 // sets it as the move target, recomputing each move file's destination.
 func (e *Engine) CreateTargetFolder(ctx context.Context, id int64) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
+	item, release, err := e.lockItemByID(ctx, id)
+	if err != nil {
+		return err
 	}
+	defer release()
+
 	if item.SuggestedLibraryID == nil || item.SuggestedFolder == "" {
-		return fmt.Errorf("kein Ordner zum Anlegen vorgeschlagen")
+		return ErrNoSuggestedFolder
 	}
 	lib, err := e.store.GetLibrary(ctx, *item.SuggestedLibraryID)
 	if err != nil {
-		return fmt.Errorf("library not found")
+		return ErrLibraryNotFound
 	}
 	return e.applyNewFolder(ctx, item, lib, item.SuggestedFolder)
 }
@@ -155,27 +153,26 @@ func (e *Engine) CreateTargetFolder(ctx context.Context, id int64) error {
 // given library and sets it as the item's move target. Used during manual
 // review when the desired destination folder does not exist yet.
 func (e *Engine) CreateNamedTargetFolder(ctx context.Context, id, libraryID int64, folder string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
-		return fmt.Errorf("item not found")
+	item, release, err := e.lockItemByID(ctx, id)
+	if err != nil {
+		return err
 	}
+	defer release()
+
 	lib, err := e.store.GetLibrary(ctx, libraryID)
 	if err != nil {
-		return fmt.Errorf("library not found")
+		return ErrLibraryNotFound
 	}
 	return e.applyNewFolder(ctx, item, lib, folder)
 }
 
 // applyNewFolder creates <lib>/<name> (a direct child of the library path), sets
 // it as the item's move target, recomputes file destinations, clears any pending
-// suggestion/error and persists. The caller must hold e.mu.
+// suggestion/error and persists. The caller must hold the item lock.
 func (e *Engine) applyNewFolder(ctx context.Context, item *store.Item, lib store.Library, name string) error {
 	folder := sanitizeFolder(name)
 	if folder == "" {
-		return fmt.Errorf("ungültiger Ordnername")
+		return ErrInvalidFolderName
 	}
 	baseDir, err := filepath.Abs(lib.Path)
 	if err != nil {
@@ -188,13 +185,13 @@ func (e *Engine) applyNewFolder(ctx context.Context, item *store.Item, lib store
 	}
 	dir, err := filepath.Abs(filepath.Join(baseDir, folder))
 	if err != nil {
-		return fmt.Errorf("ungültiger Ordnername")
+		return ErrInvalidFolderName
 	}
 	// Safety: the new folder must resolve to a direct child of the library path.
 	// filepath.Rel rejects escapes via ".."; filepath.Base(rel) ensures the
 	// resulting path has exactly one segment below the library root.
 	if rel, relErr := filepath.Rel(baseDir, dir); relErr != nil || rel != folder || filepath.Base(rel) != rel {
-		return fmt.Errorf("ungültiger Ordnername")
+		return ErrInvalidFolderName
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("Ordner anlegen: %w", err)

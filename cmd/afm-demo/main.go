@@ -23,6 +23,7 @@ import (
 	"github.com/daknoblo/AutoFileMover/internal/demo"
 	"github.com/daknoblo/AutoFileMover/internal/engine"
 	"github.com/daknoblo/AutoFileMover/internal/logbuf"
+	"github.com/daknoblo/AutoFileMover/internal/queue"
 	"github.com/daknoblo/AutoFileMover/internal/store"
 	"github.com/daknoblo/AutoFileMover/internal/version"
 	"github.com/daknoblo/AutoFileMover/internal/web"
@@ -104,7 +105,10 @@ func run(addr, root, dbPath string, log *slog.Logger) error {
 	level.Set(slog.LevelInfo)
 
 	eng := engine.New(st, cfg, log)
-	srv := web.NewServer(st, eng, cfg, log, noopResyncer{}, logs, level)
+	// The demo never touches the real filesystem, but the server needs a worker
+	// for the queue endpoints; it is created and simply never started.
+	q := queue.New(st, eng, cfg, log)
+	srv := web.NewServer(st, eng, q, cfg, log, noopResyncer{}, logs, level)
 
 	httpServer := &http.Server{
 		Addr:              addr,

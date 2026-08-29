@@ -25,8 +25,12 @@
 			<div id="fsLabel" class="fs-label" title="">
 				<span class="fs-dot"></span><span id="fsText" class="fs-text">…</span>
 			</div>
+			<button id="queueBadge" class="queue-badge" type="button" hidden>
+				<span class="queue-dot"></span><span id="queueBadgeText" class="queue-text"></span>
+			</button>
 		</div>
 		<div class="header-actions">
+			<span id="offlineBadge" class="offline-badge" hidden data-i18n="conn_lost">Verbindung gestört</span>
 			<span id="dryRunBadge" class="whatif-badge" hidden data-i18n="whatif_active">What-If aktiv</span>
 			<select id="langSelect" class="lang" title="Language">
 				<option value="de">DE</option>
@@ -38,6 +42,7 @@
 
 	<nav class="tabs">
 		<button class="tab active" data-tab="review"><span data-i18n="tab_review">Review-Queue</span> <span id="reviewCount" class="badge"></span></button>
+		<button class="tab" data-tab="queue"><span data-i18n="tab_queue">Warteschlange</span> <span id="queueCount" class="badge"></span></button>
 		<button class="tab" data-tab="history" data-i18n="tab_history">Verlauf</button>
 		<button class="tab" data-tab="logs" data-i18n="tab_logs">Logs</button>
 		<button class="tab" data-tab="settings" data-i18n="tab_settings">Einstellungen</button>
@@ -54,6 +59,13 @@
 		<section id="history" class="panel">
 			<h2 data-i18n="tab_history">Verlauf</h2>
 			<div id="historyList" class="cards"></div>
+		</section>
+
+		<section id="queue" class="panel">
+			<h2 data-i18n="queue_title">Warteschlange</h2>
+			<p class="hint" data-i18n="queue_hint">Alle Datei-Aktionen laufen im Hintergrund. Ist der Speicher ausgelastet, bleiben sie hier stehen und werden automatisch wiederholt.</p>
+			<div id="queuePaused" class="queue-paused" hidden></div>
+			<div id="queueList" class="cards"></div>
 		</section>
 
 		<section id="logs" class="panel">

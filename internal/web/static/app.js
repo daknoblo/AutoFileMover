@@ -22,17 +22,38 @@ function fmtSize(n) {
 	return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
 }
 
+// Requests are capped so a saturated storage backend can never freeze the UI:
+// the backend queues the work anyway, the browser just stops waiting for it.
+const REQUEST_TIMEOUT_MS = 15000;
+
 async function api(method, path, body) {
-	const opts = { method, headers: {} };
+	const opts = { method, headers: {}, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) };
 	if (body !== undefined) {
 		opts.headers["Content-Type"] = "application/json";
 		opts.body = JSON.stringify(body);
 	}
-	const res = await fetch("/api" + path, opts);
+	let res;
+	try {
+		res = await fetch("/api" + path, opts);
+	} catch (e) {
+		setConnected(false);
+		throw new Error(e.name === "TimeoutError" ? t("req_timeout") : t("conn_lost"));
+	}
+	setConnected(true);
 	if (res.status === 204) return null;
 	const data = await res.json().catch(() => null);
 	if (!res.ok) throw new Error(data && data.error ? data.error : "HTTP " + res.status);
 	return data;
+}
+
+// setConnected drives the header indicator. A failed poll keeps the last known
+// data on screen instead of silently presenting it as current.
+let connected = true;
+function setConnected(ok) {
+	if (ok === connected) return;
+	connected = ok;
+	const badge = document.getElementById("offlineBadge");
+	if (badge) badge.hidden = ok;
 }
 
 function toast(msg, isError) {
@@ -70,7 +91,14 @@ document.querySelectorAll(".tab").forEach((tab) => {
 		tab.classList.add("active");
 		document.getElementById(tab.dataset.tab).classList.add("active");
 		if (tab.dataset.tab === "logs") loadLogs();
+		if (tab.dataset.tab === "queue") loadQueue();
 	});
+});
+
+// The header badge jumps straight to the queue tab.
+document.getElementById("queueBadge").addEventListener("click", () => {
+	const queueTab = document.querySelector('.tab[data-tab="queue"]');
+	if (queueTab) queueTab.click();
 });
 
 // Clicking the logo / app name returns to the review queue (home).
@@ -93,14 +121,38 @@ async function loadItems() {
 	document.getElementById("reviewCount").textContent = review.length || "";
 
 	const reviewList = document.getElementById("reviewList");
-	reviewList.innerHTML = "";
+	reviewList.replaceChildren();
 	if (review.length === 0) reviewList.appendChild(el("p", { class: "hint", text: t("empty_review") }));
 	review.forEach((i) => reviewList.appendChild(reviewCard(i)));
 
 	const historyList = document.getElementById("historyList");
-	historyList.innerHTML = "";
+	historyList.replaceChildren();
 	if (history.length === 0) historyList.appendChild(el("p", { class: "hint", text: t("empty_history") }));
 	history.forEach((i) => historyList.appendChild(historyCard(i)));
+}
+
+// queueBadge renders the per-card state of an item's outstanding job, so the
+// user always sees whether an action is waiting, running or needs attention.
+function queueBadge(item) {
+	if (!item.queue_state) return null;
+	if (item.queue_state === "running") {
+		return el("span", { class: "qbadge running", text: t("q_running") });
+	}
+	if (item.queue_state === "failed") {
+		return el("span", {
+			class: "qbadge failed",
+			text: t("q_failed"),
+			title: item.queue_error || "",
+		});
+	}
+	if (item.queue_retry_in) {
+		return el("span", {
+			class: "qbadge retry",
+			text: t("q_retry_in").replace("{s}", fmtEta(item.queue_retry_in)),
+			title: item.queue_error || "",
+		});
+	}
+	return el("span", { class: "qbadge queued", text: t("q_queued") });
 }
 
 function fileRows(item, interactive) {
@@ -206,6 +258,18 @@ async function setFileAction(item, relPath, action) {
 	} catch (e) { toast(e.message, true); }
 }
 
+// queueAction posts an action that the backend executes in the background. The
+// button stays enabled: the work is persisted server-side, so a slow storage
+// backend can never leave the UI stuck in a loading state.
+async function queueAction(path, okKey) {
+	try {
+		const res = await api("POST", path);
+		toast(res && res.duplicate ? t("q_already_queued") : t(okKey));
+		refreshAll();
+		loadStatus();
+	} catch (e) { toast(e.message, true); }
+}
+
 function reviewCard(item) {
 	const collapsed = !expandedItems.has(item.id);
 	const prob = el("span", { class: "prob " + probClass(item.probability), text: Math.round(item.probability * 100) + "%" });
@@ -214,6 +278,7 @@ function reviewCard(item) {
 	const head = el("div", { class: "card-head collapsible", title: t("collapse_hint") }, [
 		el("span", { class: "caret", text: "▾" }),
 		el("div", { class: "card-title", text: item.name, title: item.name }),
+		queueBadge(item),
 		countEl,
 		prob,
 	]);
@@ -230,42 +295,15 @@ function reviewCard(item) {
 	const children = [head, errBox, fileRows(item, true)];
 
 	// Card actions, left -> right: Apply, Re-check, Reject, Set target manually.
+	// Only genuine preconditions disable a button — never request latency, since
+	// every filesystem action is handed to the background queue instead.
 	const applyBtn = el("button", { class: "btn small", text: t("apply_plan") });
 	applyBtn.disabled = !hasWork || needsTarget || hasConflict || dryRunActive;
 	if (dryRunActive) applyBtn.title = t("whatif_active");
-	applyBtn.addEventListener("click", async () => {
-		applyBtn.disabled = true;
-		applyBtn.classList.add("loading");
-		applyBtn.textContent = t("applying");
-		loadStatus();
-		try {
-			await api("POST", `/items/${item.id}/confirm`);
-			toast(t("applied"));
-			refreshAll();
-		} catch (e) {
-			toast(e.message, true);
-			applyBtn.disabled = false;
-			applyBtn.classList.remove("loading");
-			applyBtn.textContent = t("apply_plan");
-		}
-	});
+	applyBtn.addEventListener("click", () => queueAction(`/items/${item.id}/confirm`, "q_enqueued"));
+
 	const reBtn = el("button", { class: "btn small secondary", text: t("reanalyze") });
-	reBtn.addEventListener("click", async () => {
-		reBtn.disabled = true;
-		reBtn.classList.add("loading");
-		reBtn.textContent = t("analyzing");
-		toast(t("analyzing"));
-		try {
-			await api("POST", `/items/${item.id}/reclassify`);
-			toast(t("reanalyzed"));
-			refreshAll();
-		} catch (e) {
-			toast(e.message, true);
-			reBtn.disabled = false;
-			reBtn.classList.remove("loading");
-			reBtn.textContent = t("reanalyze");
-		}
-	});
+	reBtn.addEventListener("click", () => queueAction(`/items/${item.id}/reclassify`, "q_enqueued"));
 	const rejectBtn = el("button", { class: "btn small secondary", text: t("reject") });
 	rejectBtn.addEventListener("click", async () => {
 		try { await api("POST", `/items/${item.id}/reject`); refreshAll(); }
@@ -311,11 +349,18 @@ function reviewCard(item) {
 			return item.target_path.startsWith(prefix) ? item.target_path.slice(prefix.length) : "";
 		};
 		const loadSub = async (lib, selected) => {
-			subSelect.innerHTML = "";
+			subSelect.replaceChildren();
 			if (!lib || isFlat(lib)) { subSelect.style.display = "none"; return; }
 			subSelect.style.display = "";
 			subSelect.appendChild(el("option", { value: "", text: t("choose_folder") }));
-			const folders = await api("GET", `/libraries/${lib.id}/folders`).catch(() => []);
+			let folders = [];
+			try {
+				folders = await api("GET", `/libraries/${lib.id}/folders`);
+			} catch (e) {
+				// Surface the failure: an empty dropdown otherwise looks like the
+				// library genuinely has no sub-folders.
+				toast(e.message, true);
+			}
 			folders.forEach((f) => subSelect.appendChild(el("option", { value: f, text: f })));
 			// Reflect the already-chosen folder so the dropdown stays consistent with
 			// the applied target path.
@@ -354,9 +399,11 @@ function reviewCard(item) {
 			const folder = newFolder.value.trim();
 			if (!folder) return toast(t("need_folder"), true);
 			try {
-				await api("POST", `/items/${item.id}/create-folder`, { library_id: libId, folder });
+				const res = await api("POST", `/items/${item.id}/create-folder`, { library_id: libId, folder });
 				manualTargetItems.delete(item.id);
-				toast(t("folder_created")); refreshAll();
+				toast(res && res.duplicate ? t("q_already_queued") : t("q_enqueued"));
+				refreshAll();
+				loadStatus();
 			} catch (e) { toast(e.message, true); }
 		});
 		children.push(el("div", { class: "card-actions newfolder-row" }, [
@@ -424,7 +471,7 @@ function descRow(path) {
 async function loadSources() {
 	const sources = await api("GET", "/sources");
 	const list = document.getElementById("sourceList");
-	list.innerHTML = "";
+	list.replaceChildren();
 	(sources || []).forEach((s) => {
 		const del = el("button", { class: "btn small danger", text: t("remove") });
 		del.addEventListener("click", async () => {
@@ -447,7 +494,7 @@ async function loadLibraries() {
 	await loadFolderNotes();
 	libraries = (await api("GET", "/libraries")) || [];
 	const list = document.getElementById("libraryList");
-	list.innerHTML = "";
+	list.replaceChildren();
 	libraries.forEach((l) => {
 		const del = el("button", { class: "btn small danger", text: t("remove") });
 		del.addEventListener("click", async () => {
@@ -664,7 +711,91 @@ async function loadStatus() {
 		fsLabel.classList.toggle("bad", !p.fs_writable);
 		fsLabel.title = p.fs_message || (p.fs_writable ? t("fs_ok") : t("fs_bad"));
 		document.getElementById("fsText").textContent = p.fs_writable ? t("fs_ok") : t("fs_bad");
-	} catch (_) { /* ignore */ }
+		renderQueueBadge(p);
+	} catch (_) {
+		// Keep the last known status on screen; the offline badge already tells
+		// the user the values may be stale.
+	}
+}
+
+// renderQueueBadge shows how much work is still outstanding, so a user who
+// clicked several buttons can see that nothing was lost.
+function renderQueueBadge(p) {
+	const open = (p.queue_pending || 0) + (p.queue_running || 0);
+	const failed = p.queue_failed || 0;
+	const badge = document.getElementById("queueBadge");
+	const count = document.getElementById("queueCount");
+	badge.hidden = open === 0 && failed === 0 && !p.queue_paused;
+	badge.classList.toggle("paused", !!p.queue_paused);
+	badge.classList.toggle("failed", failed > 0);
+	let label = t("q_open").replace("{n}", open);
+	if (failed > 0) label += " · " + t("q_failed_n").replace("{n}", failed);
+	if (p.queue_paused) label = t("q_paused") + " · " + label;
+	document.getElementById("queueBadgeText").textContent = label;
+	badge.title = p.queue_paused ? (p.fs_message || t("q_paused")) : label;
+	count.textContent = open + failed || "";
+}
+
+// ---- Queue tab ----
+async function loadQueue() {
+	let data;
+	try {
+		data = await api("GET", "/queue");
+	} catch (e) {
+		toast(e.message, true);
+		return;
+	}
+	const paused = document.getElementById("queuePaused");
+	paused.hidden = !data.paused;
+	paused.textContent = data.paused ? t("q_paused_hint") + (data.message ? " (" + data.message + ")" : "") : "";
+
+	const list = document.getElementById("queueList");
+	list.replaceChildren();
+	if (!data.jobs || data.jobs.length === 0) {
+		list.appendChild(el("p", { class: "hint", text: t("q_empty") }));
+		return;
+	}
+	data.jobs.forEach((job) => list.appendChild(jobCard(job)));
+}
+
+function jobCard(job) {
+	const state = el("span", { class: "qbadge " + job.status, text: t("q_state_" + job.status) || job.status });
+	const title = el("div", { class: "card-title", text: job.item_name || "#" + job.item_id, title: job.item_name || "" });
+	const kind = el("span", { class: "qkind", text: t("q_kind_" + job.kind) || job.kind });
+	const head = el("div", { class: "card-head" }, [title, kind, state]);
+
+	const bits = [];
+	if (job.payload && job.payload.rel_path) bits.push(job.payload.rel_path.split("/").pop());
+	if (job.payload && job.payload.folder) bits.push(job.payload.folder);
+	if (job.attempts > 0) bits.push(t("q_attempts").replace("{n}", job.attempts));
+	if (job.status === "pending" && job.attempts > 0) {
+		const wait = Math.round((new Date(job.run_after) - Date.now()) / 1000);
+		if (wait > 0) bits.push(t("q_retry_in").replace("{s}", fmtEta(wait)));
+	}
+	const meta = bits.length ? el("div", { class: "card-sub", text: bits.join(" · ") }) : null;
+	const err = job.last_error ? el("div", { class: "card-sub err", text: job.last_error }) : null;
+
+	const actions = [];
+	if (job.status === "failed") {
+		const retry = el("button", { class: "btn small", text: t("q_retry") });
+		retry.addEventListener("click", async () => {
+			try { await api("POST", `/queue/${job.id}/retry`); toast(t("q_enqueued")); loadQueue(); }
+			catch (e) { toast(e.message, true); }
+		});
+		actions.push(retry);
+	}
+	if (job.status !== "running") {
+		const drop = el("button", { class: "btn small secondary", text: t("q_cancel") });
+		drop.addEventListener("click", async () => {
+			try { await api("DELETE", `/queue/${job.id}`); loadQueue(); }
+			catch (e) { toast(e.message, true); }
+		});
+		actions.push(drop);
+	}
+	return el("div", { class: "card" }, [
+		head, meta, err,
+		actions.length ? el("div", { class: "card-actions" }, actions) : null,
+	]);
 }
 
 // ---- Folder picker modal (sources & libraries) ----
@@ -708,7 +839,7 @@ async function pickerLoad(path) {
 		document.getElementById("libName").value = base;
 	}
 	const list = document.getElementById("pickerList");
-	list.innerHTML = "";
+	list.replaceChildren();
 	if (data.entries.length === 0) list.appendChild(el("li", { class: "hint", text: t("no_subfolders") }));
 	data.entries.forEach((entry) => {
 		const open = el("button", { class: "btn small secondary folder-open", type: "button", text: "📁 " + entry.name });
@@ -773,8 +904,16 @@ async function init() {
 	} catch (e) {
 		toast(e.message, true);
 	}
-	setInterval(() => { if (!pickerOpen()) loadItems(); }, 10000);
+	setInterval(() => {
+		if (pickerOpen()) return;
+		// A failed refresh keeps the last rendered state; the offline badge in
+		// the header signals that it may be stale.
+		loadItems().catch(() => {});
+	}, 10000);
 	setInterval(loadStatus, 1500);
+	setInterval(() => {
+		if (document.getElementById("queue").classList.contains("active")) loadQueue();
+	}, 3000);
 }
 
 init();

@@ -21,7 +21,8 @@ jobs:
     name: Build, Push, Sign & Scan
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # contents: write is needed to publish the GitHub release for a tag.
+      contents: write
       packages: write
       security-events: write
       id-token: write
@@ -46,6 +47,29 @@ jobs:
         id: image-ref
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      - name: Derive build metadata
+        id: build-meta
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="${GITHUB_REF#refs/tags/}"
+            channel="stable"
+          elif [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
+            version="develop-${GITHUB_SHA:0:7}"
+            channel="dev"
+          else
+            version="main-${GITHUB_SHA:0:7}"
+            channel="stable"
+          fi
+          semver="${version#v}"
+          {
+            echo "version=${version}"
+            echo "channel=${channel}"
+            echo "commit=${GITHUB_SHA:0:7}"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "semver=${semver}"
+            echo "minor=$(echo "$semver" | cut -d. -f1,2)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -67,6 +91,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.build-meta.outputs.version }}
+            CHANNEL=${{ steps.build-meta.outputs.channel }}
+            COMMIT=${{ steps.build-meta.outputs.commit }}
+            DATE=${{ steps.build-meta.outputs.date }}
           provenance: true
           sbom: true
           cache-from: type=gha
@@ -98,3 +127,37 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
+
+      # Uses the pre-installed gh CLI rather than a third-party action to keep
+      # the release path free of extra supply-chain surface.
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          IMAGE: ${{ steps.image-ref.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SEMVER: ${{ steps.build-meta.outputs.semver }}
+          MINOR: ${{ steps.build-meta.outputs.minor }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, nothing to do."
+            exit 0
+          fi
+          {
+            printf '## Container image\n\n'
+            printf '```\ndocker pull %s:%s\n```\n\n' "$IMAGE" "$SEMVER"
+            printf 'Also tagged `%s`, `stable` and `latest`. Built for `linux/amd64`\n' "$MINOR"
+            printf 'and `linux/arm64`, signed keyless with cosign and published with an SBOM.\n\n'
+            printf 'Digest: `%s`\n\n' "$DIGEST"
+            printf 'Verify the signature:\n\n'
+            printf '```\ncosign verify %s@%s \\\n' "$IMAGE" "$DIGEST"
+            printf "  --certificate-identity-regexp '^https://github.com/%s/' \\\\\n" "$REPO"
+            printf '  --certificate-oidc-issuer https://token.actions.githubusercontent.com\n```\n'
+          } > notes.md
+          # A tag containing a hyphen (v1.2.0-rc1) marks a pre-release.
+          case "$TAG" in
+            *-*) gh release create "$TAG" --title "$TAG" --notes-file notes.md --generate-notes --prerelease ;;
+            *)   gh release create "$TAG" --title "$TAG" --notes-file notes.md --generate-notes ;;
+          esac

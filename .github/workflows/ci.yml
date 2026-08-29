@@ -41,7 +41,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          # Must be built with the same Go release as go.mod requires, otherwise
+          # its bundled type checker rejects the language version.
+          version: v2.13.2
 
       - name: govulncheck
         run: |

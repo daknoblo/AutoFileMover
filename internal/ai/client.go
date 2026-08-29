@@ -131,7 +131,13 @@ func (c *Client) ChatJSON(ctx context.Context, system, user string) (string, err
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if rerr != nil {
+		if c.cfg.Logger != nil {
+			c.cfg.Logger.Error("ai response read failed", "url", url, "err", rerr)
+		}
+		return "", fmt.Errorf("read ai response: %w", rerr)
+	}
 	duration := time.Since(start)
 	if c.cfg.Logger != nil {
 		c.cfg.Logger.Debug("ai raw response", "status", resp.StatusCode, "duration_ms", duration.Milliseconds(), "body", string(body))
