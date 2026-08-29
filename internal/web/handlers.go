@@ -73,10 +73,12 @@ func (s *Server) itemActionContext(r *http.Request) (context.Context, context.Ca
 	return context.WithTimeout(r.Context(), itemActionTimeout)
 }
 
-// withFSDeadline runs a blocking filesystem read on its own goroutine and gives
-// up after fsReadTimeout. The goroutine finishes on its own; it only writes to
-// its private channel, so an abandoned call leaks nothing.
-func withFSDeadline[T any](parent context.Context, fn func() (T, error)) (T, error) {
+// withFSDeadline runs a blocking filesystem read for path on its own goroutine
+// and gives up after fsReadTimeout. The path is passed in rather than captured
+// so the value reaching the syscall is the one the caller validated. The
+// goroutine finishes on its own; it only writes to its private channel, so an
+// abandoned call leaks nothing.
+func withFSDeadline[T any](parent context.Context, path string, fn func(string) (T, error)) (T, error) {
 	ctx, cancel := context.WithTimeout(parent, fsReadTimeout)
 	defer cancel()
 
@@ -85,10 +87,10 @@ func withFSDeadline[T any](parent context.Context, fn func() (T, error)) (T, err
 		err error
 	}
 	done := make(chan result, 1)
-	go func() {
-		v, err := fn()
+	go func(p string) {
+		v, err := fn(p)
 		done <- result{v, err}
-	}()
+	}(path)
 	select {
 	case res := <-done:
 		return res.val, res.err
@@ -96,6 +98,21 @@ func withFSDeadline[T any](parent context.Context, fn func() (T, error)) (T, err
 		var zero T
 		return zero, ctx.Err()
 	}
+}
+
+// listSubdirNames returns the visible sub-directory names of dir.
+func listSubdirNames(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			out = append(out, e.Name())
+		}
+	}
+	return out, nil
 }
 
 func pathID(r *http.Request) (int64, error) {
@@ -114,8 +131,10 @@ func splitLines(s string) []string {
 	return out
 }
 
-// resolveWithinMediaRoot resolves symlinks for p when possible and ensures the
-// resulting path stays inside the configured media root.
+// resolveWithinMediaRoot resolves symlinks for p when possible and returns the
+// equivalent path rebuilt from the media root. Returning a freshly constructed
+// path rather than the caller's string means the result cannot carry traversal
+// of its own: Clean("/"+rel) drops every ".." before the join.
 func (s *Server) resolveWithinMediaRoot(p string) (string, error) {
 	root, err := filepath.EvalSymlinks(filepath.Clean(s.cfg.MediaRoot))
 	if err != nil {
@@ -127,10 +146,11 @@ func (s *Server) resolveWithinMediaRoot(p string) (string, error) {
 	}
 	// Keep clean inside the media root after resolving symlinks: filepath.Rel
 	// yields a ".." prefix when clean escapes root, which we reject.
-	if rel, relErr := filepath.Rel(root, clean); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	rel, relErr := filepath.Rel(root, clean)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("path must be inside the media root (%s)", root)
 	}
-	return clean, nil
+	return filepath.Join(root, filepath.Clean(string(os.PathSeparator)+rel)), nil
 }
 
 // validatePath ensures p is an absolute, existing directory inside the media root.
@@ -427,19 +447,7 @@ func (s *Server) handleLibraryFolders(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "library not found")
 		return
 	}
-	folders, err := withFSDeadline(r.Context(), func() ([]string, error) {
-		entries, rerr := os.ReadDir(lib.Path)
-		if rerr != nil {
-			return nil, rerr
-		}
-		out := []string{}
-		for _, e := range entries {
-			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-				out = append(out, e.Name())
-			}
-		}
-		return out, nil
-	})
+	folders, err := withFSDeadline(r.Context(), lib.Path, listSubdirNames)
 	if err != nil {
 		writeFSErr(w, err)
 		return
@@ -796,9 +804,7 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	dirEntries, err := withFSDeadline(r.Context(), func() ([]os.DirEntry, error) {
-		return os.ReadDir(clean)
-	})
+	dirEntries, err := withFSDeadline(r.Context(), clean, os.ReadDir)
 	if err != nil {
 		writeFSErr(w, err)
 		return

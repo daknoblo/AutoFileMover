@@ -25,6 +25,52 @@ type noopResyncer struct{}
 
 func (noopResyncer) Resync(context.Context) {}
 
+// TestResolveWithinMediaRootRebuildsPath pins the contract the browse and
+// source/library handlers rely on: whatever comes in, what comes out is a path
+// constructed from the media root, never the caller's string.
+func TestResolveWithinMediaRootRebuildsPath(t *testing.T) {
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	if err := os.MkdirAll(filepath.Join(root, "movies", "show"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{cfg: config.Config{MediaRoot: root}}
+
+	accepted := []struct{ in, want string }{
+		{root, root},
+		{filepath.Join(root, "movies"), filepath.Join(root, "movies")},
+		{filepath.Join(root, "movies", "show"), filepath.Join(root, "movies", "show")},
+		// Traversal that stays inside must resolve to the plain path.
+		{filepath.Join(root, "movies", "..", "movies", "show"), filepath.Join(root, "movies", "show")},
+	}
+	for _, tc := range accepted {
+		got, err := s.resolveWithinMediaRoot(tc.in)
+		if err != nil {
+			t.Fatalf("resolveWithinMediaRoot(%q) failed: %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Errorf("resolveWithinMediaRoot(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if rel, rerr := filepath.Rel(root, got); rerr != nil || strings.HasPrefix(rel, "..") {
+			t.Errorf("result %q escaped the media root", got)
+		}
+	}
+
+	rejected := []string{
+		filepath.Join(root, ".."),
+		filepath.Join(root, "..", "..", "etc"),
+		"/etc",
+		filepath.Join(root, "movies", "..", "..", "etc", "passwd"),
+	}
+	for _, in := range rejected {
+		if got, err := s.resolveWithinMediaRoot(in); err == nil {
+			t.Errorf("resolveWithinMediaRoot(%q) should have been rejected, got %q", in, got)
+		}
+	}
+}
+
 func testHTTP(t *testing.T) (*httptest.Server, *store.Store, string) {
 	t.Helper()
 	dir := t.TempDir()
