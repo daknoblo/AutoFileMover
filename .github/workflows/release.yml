@@ -46,6 +46,26 @@ jobs:
         id: image-ref
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      - name: Derive build metadata
+        id: build-meta
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="${GITHUB_REF#refs/tags/}"
+            channel="stable"
+          elif [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
+            version="develop-${GITHUB_SHA:0:7}"
+            channel="dev"
+          else
+            version="main-${GITHUB_SHA:0:7}"
+            channel="stable"
+          fi
+          {
+            echo "version=${version}"
+            echo "channel=${channel}"
+            echo "commit=${GITHUB_SHA:0:7}"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -67,6 +87,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.build-meta.outputs.version }}
+            CHANNEL=${{ steps.build-meta.outputs.channel }}
+            COMMIT=${{ steps.build-meta.outputs.commit }}
+            DATE=${{ steps.build-meta.outputs.date }}
           provenance: true
           sbom: true
           cache-from: type=gha
