@@ -11,7 +11,7 @@ Dockerfile, GitHub Actions, Tests und Dokumentation daran halten.
 
 ## 1. Sprache, Runtime & Grundprinzipien
 
-- **Sprache: Go 1.26**.
+- **Sprache: Go 1.27**.
 - **Module-Pfad:** `github.com/daknoblo/AutoFileMover`.
 - **Ein einzelnes, statisches Binary** als Auslieferungsartefakt.
 - **Pure-Go / CGO-frei:** Immer `CGO_ENABLED=0` bauen. Für SQLite wird
@@ -43,7 +43,7 @@ Shutdown. Nicht öffentlich wiederverwendbarer Code gehört unter `internal/`.
 
 ## 3. Docker
 
-- Mehrstufiges Dockerfile: Build-Stage `golang:1.26-alpine`, Runtime
+- Mehrstufiges Dockerfile: Build-Stage `golang:1.27-alpine`, Runtime
   `gcr.io/distroless/static-debian12:nonroot`.
 - Immer `CGO_ENABLED=0` und statisch bauen.
 - `go.mod`/`go.sum` vor dem restlichen Quellcode kopieren und `go mod download`
