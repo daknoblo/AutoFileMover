@@ -296,17 +296,17 @@ func anyUnresolvedConflict(files []store.File) bool {
 	return false
 }
 
-// routeFilesToTarget points every movable file at destDir. Files that are still
-// undecided (no action yet, e.g. a folder the AI never classified) are switched
-// to "move" so that picking a target by hand also plans the move. Explicit
-// delete/keep choices and already-done files are left untouched.
+// routeFilesToTarget points every movable file at destDir. Choosing a target by
+// hand is itself the decision to move, so undecided files (no action yet) and
+// files still parked in "keep" (review) are switched to "move". Only an explicit
+// "delete" and already-done files are left untouched.
 func routeFilesToTarget(files []store.File, destDir string) {
 	for i := range files {
 		f := &files[i]
 		if f.Done || f.RelPath == "" {
 			continue
 		}
-		if f.Action == store.FileActionDelete || f.Action == store.FileActionKeep {
+		if f.Action == store.FileActionDelete {
 			continue
 		}
 		f.Action = store.FileActionMove

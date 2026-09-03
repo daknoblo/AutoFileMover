@@ -496,7 +496,8 @@ func TestSetItemTargetRoutesFilesToMove(t *testing.T) {
 		Name:       "Movie",
 		Status:     store.StatusError,
 		Files: []store.File{
-			// Undecided files are routed to "move"; explicit choices are kept.
+			// Undecided and review ("keep") files are routed to "move";
+			// an explicit delete is kept.
 			{RelPath: "movie.mkv"},
 			{RelPath: "sample.mkv", Action: store.FileActionDelete},
 			{RelPath: "extras.mkv", Action: store.FileActionKeep},
@@ -516,8 +517,8 @@ func TestSetItemTargetRoutesFilesToMove(t *testing.T) {
 	if got.Files[1].Action != store.FileActionDelete {
 		t.Errorf("explicit delete should be preserved: %+v", got.Files[1])
 	}
-	if got.Files[2].Action != store.FileActionKeep {
-		t.Errorf("explicit keep should be preserved: %+v", got.Files[2])
+	if got.Files[2].Action != store.FileActionMove || got.Files[2].TargetPath != filepath.Join(libDir, "extras.mkv") {
+		t.Errorf("review file should route to move once a target is chosen: %+v", got.Files[2])
 	}
 }
 
@@ -576,7 +577,10 @@ func TestCreateNamedTargetFolder(t *testing.T) {
 		Name:         "New.Show.S01E01",
 		Status:       store.StatusError,
 		ErrorMessage: "classify: boom",
-		Files:        []store.File{{RelPath: "ep.mkv", Action: store.FileActionMove}},
+		Files: []store.File{
+			{RelPath: "ep.mkv", Action: store.FileActionMove},
+			{RelPath: "extras.mkv", Action: store.FileActionKeep},
+		},
 	}
 	if err := st.UpsertItem(ctx, item); err != nil {
 		t.Fatal(err)
@@ -598,6 +602,10 @@ func TestCreateNamedTargetFolder(t *testing.T) {
 	}
 	if got.Files[0].TargetPath != filepath.Join(want, "ep.mkv") {
 		t.Errorf("file target = %q, want %q", got.Files[0].TargetPath, filepath.Join(want, "ep.mkv"))
+	}
+	// Creating a target folder is a move decision too: review files follow along.
+	if got.Files[1].Action != store.FileActionMove || got.Files[1].TargetPath != filepath.Join(want, "extras.mkv") {
+		t.Errorf("review file should route to move: %+v", got.Files[1])
 	}
 }
 

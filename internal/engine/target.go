@@ -13,8 +13,9 @@ import (
 
 // SetItemTarget assigns a target library (and optional series sub-folder) to an
 // item and routes every movable file there: files already planned to move get a
-// recomputed destination, and undecided files (e.g. a folder the AI never
-// classified) are switched to "move". Explicit delete/keep choices are kept.
+// recomputed destination, and files that are undecided or parked for review are
+// switched to "move" — picking a target by hand means the file should be moved.
+// Only an explicit "delete" is kept.
 func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFolder string) error {
 	item, release, err := e.lockItemByID(ctx, id)
 	if err != nil {

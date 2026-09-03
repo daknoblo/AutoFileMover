@@ -57,9 +57,11 @@ selection** (library plus optional series folder). Cards with an already resolve
 target additionally offer "choose target manually" to override it. If the desired
 target folder does not exist yet, the same selection lets you **create a new
 folder** (enter a name → "create folder"; it is created directly below the
-library and set as the target). You then mark the file(s) with the
-move/delete/review buttons and execute the plan; setting or creating a target by
-hand clears the error and puts the item back into normal review.
+library and set as the target). Choosing or creating a target is itself the
+decision to move: every affected file switches to **move** automatically, so the
+plan can be executed right away — only files explicitly marked `delete` keep that
+action. Setting or creating a target by hand also clears the error and puts the
+item back into normal review.
 
 A **failed** AI call is **not** retried automatically on the next scan — the
 endpoint is therefore not queried endlessly. A new attempt only happens
