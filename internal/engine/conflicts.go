@@ -101,6 +101,77 @@ func listDestEntries(dir string) []destEntry {
 	return out
 }
 
+// conflictScanAttempts bounds how often the destination scan is repeated when
+// the user keeps changing the plan while it runs. Giving up after a few rounds
+// is safe: ApplyPlan re-scans authoritatively before it moves anything.
+const conflictScanAttempts = 3
+
+// DetectItemConflicts re-scans the destination folders of an item and records
+// the collisions with existing target files. It reads the storage, so it runs as
+// a queued job: UI actions that change a target or a per-file plan persist the
+// choice immediately and leave this scan to the worker, which keeps the request
+// path free of filesystem syscalls that no context can cancel.
+//
+// The scan runs WITHOUT the item lock. Listing a destination folder stalls for
+// exactly as long as the share is busy, and holding the lock across it would
+// push every concurrent UI action for that item into the "busy" 409 this queue
+// exists to avoid. The result is merged back under the lock, and only if the
+// plan still is the one that was scanned — otherwise the scan is redone, which
+// also covers the case where a change could not enqueue a job because this one
+// was already running.
+func (e *Engine) DetectItemConflicts(ctx context.Context, id int64) error {
+	for attempt := 0; attempt < conflictScanAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		item, err := e.store.GetItem(ctx, id)
+		if err != nil {
+			return err
+		}
+		if item == nil {
+			return ErrItemNotFound
+		}
+		scanned := make([]store.File, len(item.Files))
+		copy(scanned, item.Files)
+		e.detectConflicts(scanned)
+
+		merged, err := e.mergeConflicts(ctx, id, scanned)
+		if err != nil || merged {
+			return err
+		}
+	}
+	e.log.Debug("conflict scan kept losing the race with plan changes", "item", id)
+	return nil
+}
+
+// mergeConflicts copies the scan result onto the item and persists it, but only
+// while the stored plan still matches the one that was scanned. It reports false
+// when the plan moved on and the scan has to be repeated.
+func (e *Engine) mergeConflicts(ctx context.Context, id int64, scanned []store.File) (bool, error) {
+	item, release, err := e.lockItemByID(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+
+	byPath := make(map[string]*store.File, len(scanned))
+	for i := range scanned {
+		byPath[scanned[i].RelPath] = &scanned[i]
+	}
+	for i := range item.Files {
+		f := &item.Files[i]
+		s, ok := byPath[f.RelPath]
+		if !ok || s.Action != f.Action || s.TargetPath != f.TargetPath ||
+			s.Done != f.Done || s.Overwrite != f.Overwrite {
+			return false, nil
+		}
+	}
+	for i := range item.Files {
+		item.Files[i].Conflict = byPath[item.Files[i].RelPath].Conflict
+	}
+	return true, e.store.UpsertItem(ctx, item)
+}
+
 // RejectItem marks an item as rejected without moving anything.
 func (e *Engine) RejectItem(ctx context.Context, id int64) error {
 	return e.store.UpdateItemStatus(ctx, id, store.StatusRejected, "")

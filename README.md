@@ -63,6 +63,13 @@ plan can be executed right away — only files explicitly marked `delete` keep t
 action. Setting or creating a target by hand also clears the error and puts the
 item back into normal review.
 
+Picking a target and toggling a per-file action are stored immediately and never
+wait for the media storage, so they stay instant while a share is saturated. The
+check whether the destination already holds a colliding file needs to read that
+folder and is therefore queued: the conflict box appears a moment after the
+choice. Applying the plan re-checks the destination itself, so nothing is moved
+past an unreviewed collision.
+
 A **failed** AI call is **not** retried automatically on the next scan — the
 endpoint is therefore not queried endlessly. A new attempt only happens
 explicitly via "AI match".

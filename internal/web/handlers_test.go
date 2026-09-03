@@ -450,3 +450,75 @@ func TestStatusReportsQueueCounters(t *testing.T) {
 		t.Fatalf("queue_pending = %v, want 1", got["queue_pending"])
 	}
 }
+
+// TestTargetSelectionAnswersWithoutTouchingStorage pins the behaviour the review
+// UI depends on: picking a target (or toggling a per-file plan) is persisted
+// synchronously because it is a pure database change, while the destination scan
+// that needs the share is handed to the queue. Both endpoints must therefore
+// answer 200 even when the library directory is unreachable, and leave a
+// detect_conflicts job behind.
+func TestTargetSelectionAnswersWithoutTouchingStorage(t *testing.T) {
+	ts, st, dir := testHTTP(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Filme")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := st.AddLibrary(ctx, "Filme", store.KindMovie, libDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: filepath.Join(dir, "Release"),
+		Name:       "Release",
+		Status:     store.StatusPendingReview,
+		Files:      []store.File{{RelPath: "a.mkv"}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	// The share disappears after the folder list was rendered in the browser.
+	if err := os.RemoveAll(libDir); err != nil {
+		t.Fatal(err)
+	}
+	base := fmt.Sprintf("%s/api/items/%d", ts.URL, item.ID)
+
+	resp := postJSON(t, base+"/target", fmt.Sprintf(`{"library_id":%d,"sub_folder":""}`, lib.ID))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("set target = %d, want 200", resp.StatusCode)
+	}
+	got, err := st.GetItem(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TargetPath != libDir {
+		t.Errorf("target = %q, want %q", got.TargetPath, libDir)
+	}
+	if got.Files[0].Action != store.FileActionMove {
+		t.Errorf("file action = %q, want move", got.Files[0].Action)
+	}
+
+	planResp := postJSON(t, base+"/file-plan", `{"rel_path":"a.mkv","action":"move"}`)
+	defer planResp.Body.Close()
+	if planResp.StatusCode != http.StatusOK {
+		t.Fatalf("file-plan = %d, want 200", planResp.StatusCode)
+	}
+
+	jobs, err := st.ListJobs(ctx, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scans := 0
+	for _, j := range jobs {
+		if j.Kind == store.JobDetectConflicts && j.ItemID == item.ID {
+			scans++
+		}
+	}
+	// Both endpoints ask for a scan; the open-job uniqueness collapses them into
+	// one, which is enough because the job re-reads the item when it runs.
+	if scans != 1 {
+		t.Fatalf("detect_conflicts jobs = %d, want 1", scans)
+	}
+}

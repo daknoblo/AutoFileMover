@@ -335,7 +335,19 @@ func (e *Engine) ApplyPlan(ctx context.Context, id int64) error {
 	if anyUnresolvedMove(item.Files) {
 		return ErrNoTarget
 	}
+	if err := ensureTargetDirsExist(item.Files); err != nil {
+		return err
+	}
+	// Conflict detection is queued rather than run when the user picks a target,
+	// so the state loaded here may predate the latest destination. Re-scan under
+	// the item lock: this runs in the worker, where blocking on the share is
+	// expected, and it is the authoritative check that no collision slips through
+	// unreviewed because the background scan had not caught up yet.
+	e.detectConflicts(item.Files)
 	if anyUnresolvedConflict(item.Files) {
+		if uerr := e.store.UpsertItem(ctx, item); uerr != nil {
+			e.log.Error("persist detected conflicts", "id", id, "err", uerr)
+		}
 		return ErrUnresolvedConflict
 	}
 	if uerr := e.store.UpdateItemStatus(ctx, id, store.StatusMoving, ""); uerr != nil {

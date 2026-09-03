@@ -20,10 +20,11 @@ const (
 
 // Job kinds. Each maps to one filesystem-touching engine operation.
 const (
-	JobApplyPlan    = "apply_plan"
-	JobFileAction   = "file_action"
-	JobCreateFolder = "create_folder"
-	JobReclassify   = "reclassify"
+	JobApplyPlan       = "apply_plan"
+	JobFileAction      = "file_action"
+	JobCreateFolder    = "create_folder"
+	JobReclassify      = "reclassify"
+	JobDetectConflicts = "detect_conflicts"
 )
 
 // ErrJobExists is returned by EnqueueJob when an identical job is already

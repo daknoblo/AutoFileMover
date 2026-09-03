@@ -256,6 +256,8 @@ func (w *Worker) dispatch(ctx context.Context, job *store.Job) error {
 		return w.eng.CreateTargetFolder(ctx, job.ItemID)
 	case store.JobReclassify:
 		return w.eng.ReclassifyItem(ctx, job.ItemID)
+	case store.JobDetectConflicts:
+		return w.eng.DetectItemConflicts(ctx, job.ItemID)
 	default:
 		return errUnknownKind
 	}

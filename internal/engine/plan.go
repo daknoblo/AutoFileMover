@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -33,6 +34,11 @@ func (e *Engine) ApplyFileAction(ctx context.Context, id int64, relPath, action 
 	if idx < 0 {
 		return ErrFileNotFound
 	}
+	if action == store.FileActionMove {
+		if err := ensureTargetDirsExist(item.Files[idx : idx+1]); err != nil {
+			return err
+		}
+	}
 	e.startPhase(PhaseMoving, 1)
 	defer e.finishProgress()
 	e.updateProgress(0, filepath.Base(relPath))
@@ -55,7 +61,10 @@ func (e *Engine) ApplyFileAction(ctx context.Context, id int64, relPath, action 
 
 // PlanFileAction sets the planned action for a single file WITHOUT touching the
 // filesystem. The review UI uses it for the per-file toggle buttons; execution
-// happens later via ApplyPlan ("Apply").
+// happens later via ApplyPlan ("Apply"). Detecting whether the new destination
+// collides with an existing file needs a directory listing, so it is left to the
+// queued JobDetectConflicts scan — the toggle itself must persist instantly even
+// while the storage is saturated.
 func (e *Engine) PlanFileAction(ctx context.Context, id int64, relPath, action string) error {
 	switch action {
 	case store.FileActionMove, store.FileActionDelete, store.FileActionKeep:
@@ -91,7 +100,6 @@ func (e *Engine) PlanFileAction(ctx context.Context, id int64, relPath, action s
 	} else {
 		f.TargetPath = ""
 	}
-	e.detectConflicts(item.Files)
 	// Manually planning an action means the user is taking over a failed or
 	// unresolved classification: clear the error state and route it as review.
 	if item.Status == store.StatusError {
@@ -131,6 +139,39 @@ func (e *Engine) executePlan(ctx context.Context, item *store.Item, reportProgre
 		e.updateProgress(done, "")
 	}
 	e.finalize(ctx, item)
+	return nil
+}
+
+// ensureTargetDirsExist verifies that every planned destination folder is still
+// there. Picking a target no longer stats it — that syscall cannot be cancelled
+// and belongs nowhere near an HTTP handler — so the check happens here, in the
+// worker. Without it a folder that was renamed on the share since the dropdown
+// was rendered would be silently recreated by the MkdirAll inside mover.Move,
+// filing the media into a directory the user never chose.
+func ensureTargetDirsExist(files []store.File) error {
+	checked := make(map[string]bool)
+	for i := range files {
+		f := &files[i]
+		if f.Done || f.Action != store.FileActionMove || f.TargetPath == "" {
+			continue
+		}
+		dir := filepath.Dir(f.TargetPath)
+		if checked[dir] {
+			continue
+		}
+		checked[dir] = true
+		info, err := os.Stat(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("%w: %s", ErrTargetDirMissing, dir)
+			}
+			// Anything else (share down, timeout) is transient: let the queue retry.
+			return fmt.Errorf("Zielordner prüfen: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%w: %s", ErrTargetDirMissing, dir)
+		}
+	}
 	return nil
 }
 
@@ -299,7 +340,9 @@ func anyUnresolvedConflict(files []store.File) bool {
 // routeFilesToTarget points every movable file at destDir. Choosing a target by
 // hand is itself the decision to move, so undecided files (no action yet) and
 // files still parked in "keep" (review) are switched to "move". Only an explicit
-// "delete" and already-done files are left untouched.
+// "delete" and already-done files are left untouched. Any collision recorded for
+// the previous destination is dropped: it says nothing about the new one, and
+// re-scanning is the queued conflict job's task.
 func routeFilesToTarget(files []store.File, destDir string) {
 	for i := range files {
 		f := &files[i]
@@ -313,5 +356,6 @@ func routeFilesToTarget(files []store.File, destDir string) {
 		f.TargetPath = filepath.Join(destDir, filepath.Base(f.RelPath))
 		f.Overwrite = false
 		f.OverwritePath = ""
+		f.Conflict = nil
 	}
 }

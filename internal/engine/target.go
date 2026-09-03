@@ -16,6 +16,12 @@ import (
 // recomputed destination, and files that are undecided or parked for review are
 // switched to "move" — picking a target by hand means the file should be moved.
 // Only an explicit "delete" is kept.
+//
+// The function deliberately performs no filesystem access. Those syscalls cannot
+// be cancelled by a context, so a saturated share would block the HTTP request
+// past the browser timeout and the user's choice would be lost. Validation is
+// limited to the (purely lexical) traversal check; scanning the destination for
+// collisions is left to the queued JobDetectConflicts scan.
 func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFolder string) error {
 	item, release, err := e.lockItemByID(ctx, id)
 	if err != nil {
@@ -41,13 +47,9 @@ func (e *Engine) SetItemTarget(ctx context.Context, id, libraryID int64, subFold
 	if rel, relErr := filepath.Rel(lib.Path, destDir); relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return fmt.Errorf("%w: %s", ErrInvalidFolderName, subFolder)
 	}
-	if info, err := os.Stat(destDir); err != nil || !info.IsDir() {
-		return fmt.Errorf("Zielordner existiert nicht: %s", destDir)
-	}
 	item.TargetLibraryID = &lib.ID
 	item.TargetPath = destDir
 	routeFilesToTarget(item.Files, destDir)
-	e.detectConflicts(item.Files)
 	// Setting a target by hand means the user is taking over a failed or
 	// unresolved classification: clear any error and route it as normal review.
 	if item.Status == store.StatusError {

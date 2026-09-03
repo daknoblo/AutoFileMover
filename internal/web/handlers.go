@@ -534,6 +534,25 @@ func (s *Server) enqueue(w http.ResponseWriter, r *http.Request, id int64, kind 
 	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true, "job_id": job.ID})
 }
 
+// scheduleConflictScan queues the destination scan that records collisions with
+// existing files. Scanning reads the storage, so it must never happen in the
+// request path: the user's choice is already persisted, and the worker fills in
+// the collision state as soon as the share responds. A scan that is already
+// queued covers the new state too, because the job re-reads the item when it
+// runs. The enqueue outlives the request so a user navigating away still gets
+// the scan.
+func (s *Server) scheduleConflictScan(r *http.Request, id int64) {
+	ctx := context.WithoutCancel(r.Context())
+	if _, err := s.store.EnqueueJob(ctx, id, store.JobDetectConflicts, store.JobPayload{}); err != nil {
+		if !errors.Is(err, store.ErrJobExists) {
+			s.log.Warn("queue conflict scan", "item", id, "err", err)
+		}
+		return
+	}
+	s.queue.Notify()
+}
+
+// handleConfirmItem queues the plan execution for an item.
 func (s *Server) handleConfirmItem(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
@@ -569,6 +588,7 @@ func (s *Server) handleSetItemTarget(w http.ResponseWriter, r *http.Request) {
 		writeItemErr(w, err)
 		return
 	}
+	s.scheduleConflictScan(r, id)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -612,6 +632,7 @@ func (s *Server) handlePlanFileAction(w http.ResponseWriter, r *http.Request) {
 		writeItemErr(w, err)
 		return
 	}
+	s.scheduleConflictScan(r, id)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "planned"})
 }
 

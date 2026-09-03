@@ -37,6 +37,9 @@ var (
 	ErrInvalidFolderName = errors.New("ungültiger Ordnername")
 	// ErrNoConflict is returned when resolving a collision that does not exist.
 	ErrNoConflict = errors.New("kein Konflikt für diese Datei")
+	// ErrTargetDirMissing is returned when a planned destination folder is gone
+	// by the time the plan runs.
+	ErrTargetDirMissing = errors.New("Zielordner existiert nicht")
 	// ErrInvalidResolution is returned for an unknown conflict resolution.
 	ErrInvalidResolution = errors.New("invalid resolution")
 )
@@ -59,6 +62,7 @@ func IsPermanent(err error) bool {
 		errors.Is(err, ErrNoSuggestedFolder),
 		errors.Is(err, ErrInvalidFolderName),
 		errors.Is(err, ErrNoConflict),
+		errors.Is(err, ErrTargetDirMissing),
 		errors.Is(err, ErrInvalidResolution):
 		return true
 	}

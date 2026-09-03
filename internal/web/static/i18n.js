@@ -67,6 +67,7 @@ const I18N = {
 		q_state_pending: "wartet", q_state_running: "läuft", q_state_failed: "fehlgeschlagen", q_state_done: "erledigt",
 		q_kind_apply_plan: "Plan ausführen", q_kind_file_action: "Datei-Aktion",
 		q_kind_create_folder: "Ordner anlegen", q_kind_reclassify: "KI-Abgleich",
+		q_kind_detect_conflicts: "Ziel prüfen",
 	},
 	en: {
 		whatif: "What-if mode", whatif_hint: "In what-if mode no files are moved.",
@@ -131,6 +132,7 @@ const I18N = {
 		q_state_pending: "waiting", q_state_running: "running", q_state_failed: "failed", q_state_done: "done",
 		q_kind_apply_plan: "Apply plan", q_kind_file_action: "File action",
 		q_kind_create_folder: "Create folder", q_kind_reclassify: "AI match",
+		q_kind_detect_conflicts: "Check target",
 	},
 };
 

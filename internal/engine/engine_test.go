@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/daknoblo/AutoFileMover/internal/ai"
 	"github.com/daknoblo/AutoFileMover/internal/config"
@@ -725,5 +728,377 @@ func TestResolveTargetUsesSubfolderFlag(t *testing.T) {
 	libs[0].UseSubfolders = true
 	if _, _, ok, _ := e.resolveTarget(&ai.Result{Library: "Filme"}, libs); ok {
 		t.Error("library flipped to use sub-folders should need review when none match")
+	}
+}
+
+// TestSetItemTargetPersistsWhileStorageIsUnreachable pins the responsiveness
+// contract of the review UI: choosing a target is a database change and must
+// survive a storage backend that cannot be reached. Filesystem syscalls ignore
+// context cancellation, so a stat or a directory listing in this path would
+// block the HTTP handler past the browser timeout and silently drop the choice.
+// The unreachable library directory stands in for a stalled share.
+func TestSetItemTargetPersistsWhileStorageIsUnreachable(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Filme")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := st.AddLibrary(ctx, "Filme", store.KindMovie, libDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src", "Movie")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "Movie",
+		Files:      []store.File{{RelPath: "movie.mkv"}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	// The share goes away between listing the folders and picking one.
+	if err := os.RemoveAll(libDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.SetItemTarget(ctx, item.ID, lib.ID, ""); err != nil {
+		t.Fatalf("set target must not depend on the storage: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.TargetPath != libDir {
+		t.Errorf("target = %q, want %q", got.TargetPath, libDir)
+	}
+	if got.Files[0].Action != store.FileActionMove || got.Files[0].TargetPath != filepath.Join(libDir, "movie.mkv") {
+		t.Errorf("file plan not persisted: %+v", got.Files[0])
+	}
+}
+
+// TestPlanFileActionPersistsWhileStorageIsUnreachable covers the same contract
+// for the per-file move/delete/review toggles. Scanning the destination would
+// touch every file of the item, so a stale collision recorded for an untouched
+// file is the observable proof that the toggle no longer reads the storage.
+func TestPlanFileActionPersistsWhileStorageIsUnreachable(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Filme")
+	srcDir := filepath.Join(dir, "src", "Movie")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "Movie",
+		TargetPath: libDir, // points at a share that is not reachable
+		Files: []store.File{
+			{RelPath: "movie.mkv", Action: store.FileActionKeep},
+			{
+				RelPath:    "extras.mkv",
+				Action:     store.FileActionMove,
+				TargetPath: filepath.Join(libDir, "extras.mkv"),
+				Conflict:   &store.FileConflict{ExistingName: "extras.mkv", ExistingPath: filepath.Join(libDir, "extras.mkv")},
+			},
+		},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.PlanFileAction(ctx, item.ID, "movie.mkv", store.FileActionMove); err != nil {
+		t.Fatalf("plan file action must not depend on the storage: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.Files[0].Action != store.FileActionMove || got.Files[0].TargetPath != filepath.Join(libDir, "movie.mkv") {
+		t.Errorf("file plan not persisted: %+v", got.Files[0])
+	}
+	if got.Files[1].Conflict == nil {
+		t.Error("toggling one file must not re-scan the destination for the others")
+	}
+}
+
+// TestDetectItemConflictsFillsInCollisions checks the split between the instant
+// database change and the queued destination scan: SetItemTarget leaves the
+// collision undetected, the background job records it.
+func TestDetectItemConflictsFillsInCollisions(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Filme")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(libDir, "movie.mkv")
+	if err := os.WriteFile(existing, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := st.AddLibrary(ctx, "Filme", store.KindMovie, libDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src", "Movie")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "Movie",
+		Files:      []store.File{{RelPath: "movie.mkv"}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.SetItemTarget(ctx, item.ID, lib.ID, ""); err != nil {
+		t.Fatalf("set target: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.Files[0].Conflict != nil {
+		t.Error("set target must not scan the destination itself")
+	}
+
+	if err := eng.DetectItemConflicts(ctx, item.ID); err != nil {
+		t.Fatalf("detect conflicts: %v", err)
+	}
+	got, _ = st.GetItem(ctx, item.ID)
+	if got.Files[0].Conflict == nil {
+		t.Fatal("background scan did not record the collision")
+	}
+	if got.Files[0].Conflict.ExistingPath != existing {
+		t.Errorf("existing path = %q, want %q", got.Files[0].Conflict.ExistingPath, existing)
+	}
+}
+
+// TestApplyPlanDetectsUnscannedConflict guards the safety net behind the queued
+// scan: because collisions are recorded asynchronously, applying a plan must
+// re-check the destination itself instead of trusting possibly stale state.
+func TestApplyPlanDetectsUnscannedConflict(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Filme")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(libDir, "movie.mkv"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src", "Movie")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "movie.mkv"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "Movie",
+		TargetPath: libDir,
+		// No Conflict recorded: the background scan has not run yet.
+		Files: []store.File{{
+			RelPath:    "movie.mkv",
+			Action:     store.FileActionMove,
+			TargetPath: filepath.Join(libDir, "movie.mkv"),
+		}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.ApplyPlan(ctx, item.ID); !errors.Is(err, ErrUnresolvedConflict) {
+		t.Fatalf("apply plan = %v, want ErrUnresolvedConflict", err)
+	}
+	// The source file must still be there and the collision recorded for the UI.
+	if _, err := os.Stat(filepath.Join(srcDir, "movie.mkv")); err != nil {
+		t.Errorf("source file was moved despite the collision: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.Files[0].Conflict == nil {
+		t.Error("detected collision was not persisted for review")
+	}
+}
+
+// destEntriesForLockProbe sizes the destination folder used to make one scan
+// measurably long. Below ~30ms the assertion cannot tell a held lock from a
+// fast one, and the test skips instead of flaking.
+const destEntriesForLockProbe = 20000
+
+// TestDetectItemConflictsLeavesItemUnlocked is the counterpart to the queued
+// scan: listing a destination folder takes as long as the share needs, so the
+// scan must not hold the item lock while it runs. If it did, the very next click
+// in the review card would wait for the storage and be answered with "busy" —
+// exactly the failure the queue exists to prevent. A destination with many
+// entries makes the scan long enough to observe the lock during it.
+func TestDetectItemConflictsLeavesItemUnlocked(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Filme")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range destEntriesForLockProbe {
+		f, err := os.Create(filepath.Join(libDir, fmt.Sprintf("f%05d.mkv", i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srcDir := filepath.Join(dir, "src", "Movie")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := []store.File{{
+		RelPath:    "movie.mkv",
+		Action:     store.FileActionMove,
+		TargetPath: filepath.Join(libDir, "movie.mkv"),
+	}}
+	item := &store.Item{SourcePath: srcDir, Name: "Movie", TargetPath: libDir, Files: files}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	// Measure what one scan of this destination costs, then require the lock to
+	// be free in the middle of a scan of the same size.
+	probe := make([]store.File, len(files))
+	copy(probe, files)
+	started := time.Now()
+	eng.detectConflicts(probe)
+	scanCost := time.Since(started)
+	if scanCost < 30*time.Millisecond {
+		t.Skipf("filesystem lists %d entries in %v, too fast to observe the lock", destEntriesForLockProbe, scanCost)
+	}
+
+	scanDone := make(chan error, 1)
+	go func() { scanDone <- eng.DetectItemConflicts(ctx, item.ID) }()
+
+	time.Sleep(scanCost / 4)
+	lockCtx, cancel := context.WithTimeout(ctx, scanCost/2)
+	defer cancel()
+	release, err := eng.locks.acquire(lockCtx, srcDir)
+	if err != nil {
+		t.Fatalf("item stayed locked during the %v destination scan: %v", scanCost, err)
+	}
+	release()
+
+	select {
+	case err := <-scanDone:
+		if err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("conflict scan did not finish")
+	}
+}
+
+// TestDetectItemConflictsRescansAfterPlanChange covers the window in which a
+// plan change cannot enqueue its own scan because this one is already running:
+// the scan must notice that the plan moved on and redo the work.
+func TestDetectItemConflictsRescansAfterPlanChange(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libA := filepath.Join(dir, "A")
+	libB := filepath.Join(dir, "B")
+	for _, d := range []string{libA, libB} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Only the second library holds a colliding file.
+	if err := os.WriteFile(filepath.Join(libB, "movie.mkv"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src", "Movie")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "Movie",
+		TargetPath: libA,
+		Files: []store.File{{
+			RelPath:    "movie.mkv",
+			Action:     store.FileActionMove,
+			TargetPath: filepath.Join(libA, "movie.mkv"),
+		}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the retarget landing while the scan of library A is in flight, by
+	// feeding mergeConflicts a result for the plan that is no longer stored.
+	stale := []store.File{{
+		RelPath:    "movie.mkv",
+		Action:     store.FileActionMove,
+		TargetPath: filepath.Join(libA, "movie.mkv"),
+	}}
+	item.TargetPath = libB
+	item.Files[0].TargetPath = filepath.Join(libB, "movie.mkv")
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := eng.mergeConflicts(ctx, item.ID, stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged {
+		t.Fatal("a scan of the previous destination must not be merged")
+	}
+
+	// A full run picks up the current destination and finds the collision there.
+	if err := eng.DetectItemConflicts(ctx, item.ID); err != nil {
+		t.Fatalf("detect conflicts: %v", err)
+	}
+	got, _ := st.GetItem(ctx, item.ID)
+	if got.Files[0].Conflict == nil {
+		t.Fatal("re-scan did not record the collision at the new destination")
+	}
+}
+
+// TestApplyPlanRejectsMissingTargetDir makes sure dropping the target check from
+// the request path did not turn a vanished folder into a silently recreated one:
+// mover.Move would MkdirAll it, filing media into a directory nobody chose.
+func TestApplyPlanRejectsMissingTargetDir(t *testing.T) {
+	eng, st, dir := testEngine(t)
+	ctx := context.Background()
+
+	libDir := filepath.Join(dir, "Filme", "Renamed Away")
+	srcDir := filepath.Join(dir, "src", "Movie")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "movie.mkv"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	item := &store.Item{
+		SourcePath: srcDir,
+		Name:       "Movie",
+		TargetPath: libDir,
+		Files: []store.File{{
+			RelPath:    "movie.mkv",
+			Action:     store.FileActionMove,
+			TargetPath: filepath.Join(libDir, "movie.mkv"),
+		}},
+	}
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.ApplyPlan(ctx, item.ID); !errors.Is(err, ErrTargetDirMissing) {
+		t.Fatalf("apply plan = %v, want ErrTargetDirMissing", err)
+	}
+	if _, err := os.Stat(libDir); !os.IsNotExist(err) {
+		t.Error("the missing target folder was created instead of reported")
+	}
+	if _, err := os.Stat(filepath.Join(srcDir, "movie.mkv")); err != nil {
+		t.Errorf("source file should be untouched: %v", err)
 	}
 }

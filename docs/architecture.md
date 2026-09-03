@@ -60,6 +60,22 @@ parallel jobs would only add contention. A job left `running` by a restart is
 reset to `pending`; because every completed file is persisted immediately, a
 resumed plan continues where it stopped instead of redoing work.
 
+### Plan changes are database-only
+
+Choosing a target library or toggling a per-file action is a review *decision*,
+not a filesystem action, so it is persisted synchronously and answered with
+`200`. That only holds as long as those handlers stay free of storage access:
+Go's file syscalls cannot be cancelled by a context, so a single `Stat` or
+directory listing on a stalled share would block the request past the browser
+timeout and the user's choice would be lost.
+
+Detecting whether a destination already holds a colliding file needs a directory
+listing, so it is split off into a `detect_conflicts` job that the worker runs
+right after the decision was stored. The review card therefore shows collisions a
+moment later rather than immediately. Because that state can lag, `ApplyPlan`
+re-scans the destination itself before moving anything — the queued scan drives
+the display, the re-check in the worker is authoritative.
+
 ## Concurrency
 
 Work is serialized per item, keyed by source path, not globally. A scan, an AI
