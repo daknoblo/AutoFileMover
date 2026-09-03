@@ -258,13 +258,18 @@ func (s *Store) ListJobs(ctx context.Context, limit int) ([]Job, error) {
 }
 
 // OpenJobsByItem returns the most relevant open job per item id, so the review
-// cards can show a queue badge without one query per card.
+// cards can show a queue badge and lock their actions without one query per card.
+//
+// Jobs the user started explicitly outrank the detect_conflicts housekeeping
+// scan. Without that a running background scan would mask an apply_plan waiting
+// behind it, and the card would offer a button for work that is already queued.
 func (s *Store) OpenJobsByItem(ctx context.Context) (map[int64]Job, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, item_id, kind, payload_json, status, attempts, last_error, run_after, created_at, updated_at
 		FROM jobs WHERE status IN (?, ?, ?)
-		ORDER BY CASE status WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END, id`,
-		JobRunning, JobFailed, JobPending, JobRunning, JobFailed)
+		ORDER BY CASE WHEN kind = ? THEN 1 ELSE 0 END,
+			CASE status WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END, id`,
+		JobRunning, JobFailed, JobPending, JobDetectConflicts, JobRunning, JobFailed)
 	if err != nil {
 		return nil, fmt.Errorf("open jobs: %w", err)
 	}

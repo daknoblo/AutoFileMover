@@ -143,6 +143,7 @@ input, select {
 	padding: 8px 10px;
 	font-size: 14px;
 }
+input:disabled, select:disabled { opacity: .5; cursor: default; }
 textarea {
 	background: var(--panel);
 	border: 1px solid var(--border);
@@ -232,6 +233,10 @@ textarea {
 .fbtn.review.on { background: var(--yellow); border-color: var(--yellow); color: #1a1d23; }
 .fbtn.move.on { background: var(--green); border-color: var(--green); color: #06231a; }
 .fbtn.delete.on { background: var(--red); border-color: var(--red); color: #fff; }
+/* Locked while the item's action is queued: keep the chosen action readable but
+   clearly inert, and stop the hover affordance from suggesting otherwise. */
+.fbtn:disabled { opacity: .45; cursor: default; }
+.fbtn:disabled:hover { color: var(--muted); border-color: var(--border); }
 .btn.tiny { padding: 3px 8px; font-size: 12px; }
 .ftag { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
 .ftag.move { background: rgba(79,140,255,.18); color: var(--accent); }

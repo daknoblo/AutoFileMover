@@ -68,6 +68,7 @@ const I18N = {
 		q_kind_apply_plan: "Plan ausführen", q_kind_file_action: "Datei-Aktion",
 		q_kind_create_folder: "Ordner anlegen", q_kind_reclassify: "KI-Abgleich",
 		q_kind_detect_conflicts: "Ziel prüfen",
+		q_busy_hint: "Aktion ist bereits in der Warteschlange – gesperrt, bis sie abgearbeitet ist.",
 	},
 	en: {
 		whatif: "What-if mode", whatif_hint: "In what-if mode no files are moved.",
@@ -133,6 +134,7 @@ const I18N = {
 		q_kind_apply_plan: "Apply plan", q_kind_file_action: "File action",
 		q_kind_create_folder: "Create folder", q_kind_reclassify: "AI match",
 		q_kind_detect_conflicts: "Check target",
+		q_busy_hint: "Action is already queued – locked until it has been processed.",
 	},
 };
 

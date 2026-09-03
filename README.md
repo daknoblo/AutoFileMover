@@ -114,6 +114,14 @@ The **Queue** tab lists every job with its state, attempt count, next retry and
 error message, and lets you retry or cancel one. A badge in the header shows how
 much work is still outstanding.
 
+Once an action is queued, that card's buttons are **locked** until the worker is
+done with it, so the queue stays the single source of truth for what is still
+outstanding and a second click cannot pile up duplicate work. The card badge
+shows whether the job is waiting, running or failed; a **failed** job leaves the
+buttons usable, because that one needs a new decision rather than more waiting.
+The destination check that runs after every plan change is background
+housekeeping and never locks a card.
+
 If the media root becomes unwritable (share offline, no free IOPS), the queue
 **pauses** instead of failing: jobs are kept, no retry budget is consumed, and
 processing resumes automatically once storage responds again. Transient I/O

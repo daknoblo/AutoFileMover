@@ -14,6 +14,20 @@ const manualTargetItems = new Set();
 // so it never wipes the user's in-progress dropdown selection or typed input.
 function pickerOpen() { return manualTargetItems.size > 0; }
 
+// Job kinds the user triggers explicitly. While one of them is queued or running
+// the card's controls are locked: the work is already recorded, so a second click
+// would either be dropped as a duplicate or fight the worker for the item lock.
+// The detect_conflicts scan is deliberately absent — it runs after every plan
+// change and must never gray out the card the user is still working in.
+const BLOCKING_JOB_KINDS = new Set(["apply_plan", "file_action", "create_folder", "reclassify"]);
+
+// itemBusy reports whether an action the user started is still outstanding. A
+// failed job does not count: that one needs a new decision, not more waiting.
+function itemBusy(item) {
+	return (item.queue_state === "pending" || item.queue_state === "running")
+		&& BLOCKING_JOB_KINDS.has(item.queue_kind);
+}
+
 function fmtSize(n) {
 	if (!n) return "";
 	const u = ["B", "KB", "MB", "GB", "TB"];
@@ -157,6 +171,7 @@ function queueBadge(item) {
 
 function fileRows(item, interactive) {
 	const box = el("div", { class: "files" });
+	const busy = interactive && itemBusy(item);
 	(item.files || []).slice(0, 100).forEach((f) => {
 		const action = f.action || "keep";
 		const isEmpty = !f.rel_path;
@@ -200,6 +215,7 @@ function fileRows(item, interactive) {
 			const del = el("button", { class: "fbtn delete" + (action === "delete" ? " on" : ""), text: t("btn_delete") });
 			del.addEventListener("click", () => setFileAction(item, f.rel_path, "delete"));
 			btns.push(del);
+			btns.forEach((b) => { if (busy) { b.disabled = true; b.title = t("q_busy_hint"); } });
 			acts = el("div", { class: "frow-acts" }, btns);
 		}
 		const info = el("div", { class: "frow-info" }, [meta, targetEl]);
@@ -230,6 +246,9 @@ function conflictBlock(item, f) {
 	replaceBtn.addEventListener("click", () => resolveConflict(item, f.rel_path, "replace"));
 	const keepBtn = el("button", { class: "btn small secondary", text: t("conflict_keep") });
 	keepBtn.addEventListener("click", () => resolveConflict(item, f.rel_path, "keep"));
+	if (itemBusy(item)) {
+		[replaceBtn, keepBtn].forEach((b) => { b.disabled = true; b.title = t("q_busy_hint"); });
+	}
 	return el("div", { class: "frow-conflict" }, [
 		el("div", { class: "cf-head", text: "⚠ " + t("conflict_title") }),
 		el("div", { class: "cf-hint", text: t("conflict_hint") }),
@@ -292,14 +311,18 @@ function reviewCard(item) {
 	// The library picker stays hidden until the user clicks "Set target manually".
 	const wantsManual = manualTargetItems.has(item.id);
 	const showTargetPicker = hasRealFiles && wantsManual;
+	// An action the user already started locks the card until the worker is done,
+	// so the queue stays the single source of truth for what is still outstanding.
+	const busy = itemBusy(item);
 	const children = [head, errBox, fileRows(item, true)];
 
 	// Card actions, left -> right: Apply, Re-check, Reject, Set target manually.
-	// Only genuine preconditions disable a button — never request latency, since
-	// every filesystem action is handed to the background queue instead.
+	// Apart from the queue lock only genuine preconditions disable a button —
+	// never request latency, since every filesystem action is queued instead.
 	const applyBtn = el("button", { class: "btn small", text: t("apply_plan") });
-	applyBtn.disabled = !hasWork || needsTarget || hasConflict || dryRunActive;
-	if (dryRunActive) applyBtn.title = t("whatif_active");
+	applyBtn.disabled = busy || !hasWork || needsTarget || hasConflict || dryRunActive;
+	if (busy) applyBtn.title = t("q_busy_hint");
+	else if (dryRunActive) applyBtn.title = t("whatif_active");
 	applyBtn.addEventListener("click", () => queueAction(`/items/${item.id}/confirm`, "q_enqueued"));
 
 	const reBtn = el("button", { class: "btn small secondary", text: t("reanalyze") });
@@ -319,6 +342,11 @@ function reviewCard(item) {
 			refreshAll();
 		});
 		cardActions.push(manualBtn);
+	}
+	// Everything below changes the plan or the item, so the queue lock covers the
+	// whole row; Apply keeps its own reason when it has one.
+	if (busy) {
+		[reBtn, rejectBtn, ...cardActions.slice(3)].forEach((b) => { b.disabled = true; b.title = t("q_busy_hint"); });
 	}
 	children.push(el("div", { class: "card-actions" }, cardActions));
 
@@ -387,7 +415,6 @@ function reviewCard(item) {
 			el("span", { class: "picker-label", text: t("manual_target_label") }),
 			libSelect, subSelect,
 		]));
-
 		// Second row: create a NEW folder under the selected library. Pre-filled
 		// with the AI suggestion when there is one.
 		const newFolder = el("input", { type: "text", class: "newfolder", "data-i18n-ph": "new_folder_ph", placeholder: t("new_folder_ph") });
@@ -410,6 +437,14 @@ function reviewCard(item) {
 			el("span", { class: "picker-label", text: t("new_folder_label") }),
 			newFolder, createBtn,
 		]));
+		// Retargeting an item whose action is already running would race the
+		// worker for the item lock, so the picker follows the same queue lock.
+		if (busy) {
+			[libSelect, subSelect, newFolder, createBtn].forEach((c) => {
+				c.disabled = true;
+				c.title = t("q_busy_hint");
+			});
+		}
 	}
 
 	const card = el("div", { class: "card" + (collapsed ? " collapsed" : "") }, children);
@@ -712,16 +747,29 @@ async function loadStatus() {
 		fsLabel.title = p.fs_message || (p.fs_writable ? t("fs_ok") : t("fs_bad"));
 		document.getElementById("fsText").textContent = p.fs_writable ? t("fs_ok") : t("fs_bad");
 		renderQueueBadge(p);
+		syncCardsWithQueue(p);
 	} catch (_) {
 		// Keep the last known status on screen; the offline badge already tells
 		// the user the values may be stale.
 	}
 }
 
+// syncCardsWithQueue refreshes the review list as soon as the number of open jobs
+// changes. The list itself only polls every 10s, which would leave a card locked
+// long after its job finished; this status poll runs every 1.5s, so the buttons
+// come back about as quickly as the work completes.
+let lastOpenJobs = null;
+function syncCardsWithQueue(p) {
+	const open = (p.queue_pending || 0) + (p.queue_running || 0);
+	const changed = lastOpenJobs !== null && open !== lastOpenJobs;
+	lastOpenJobs = open;
+	// A picker in mid-edit must not be re-rendered underneath the user.
+	if (changed && !pickerOpen()) loadItems().catch(() => {});
+}
+
 // renderQueueBadge shows how much work is still outstanding, so a user who
 // clicked several buttons can see that nothing was lost.
-function renderQueueBadge(p) {
-	const open = (p.queue_pending || 0) + (p.queue_running || 0);
+function renderQueueBadge(p) {	const open = (p.queue_pending || 0) + (p.queue_running || 0);
 	const failed = p.queue_failed || 0;
 	const badge = document.getElementById("queueBadge");
 	const count = document.getElementById("queueCount");

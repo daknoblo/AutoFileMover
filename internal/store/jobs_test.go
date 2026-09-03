@@ -224,3 +224,49 @@ func TestPruneDoneJobs(t *testing.T) {
 		t.Fatalf("expired finished job must be pruned, got %d", len(jobs))
 	}
 }
+
+// TestOpenJobsByItemPrefersUserActions pins what the review card needs to lock
+// its buttons: the housekeeping conflict scan runs after every plan change, so a
+// running one must not hide an apply_plan that is still waiting behind it. The
+// card would otherwise offer a button for work that is already queued.
+func TestOpenJobsByItemPrefersUserActions(t *testing.T) {
+	st, itemID := jobStore(t)
+	ctx := t.Context()
+
+	// The scan is enqueued first and claimed first, so only the kind ranking can
+	// keep the queued user action visible.
+	if _, err := st.EnqueueJob(ctx, itemID, JobDetectConflicts, JobPayload{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnqueueJob(ctx, itemID, JobApplyPlan, JobPayload{}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := st.ClaimNextJob(ctx)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim: %v, %v", claimed, err)
+	}
+	if claimed.Kind != JobDetectConflicts {
+		t.Fatalf("claimed %q first, want the scan", claimed.Kind)
+	}
+	open, err := st.OpenJobsByItem(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := open[itemID]; got.Kind != JobApplyPlan {
+		t.Fatalf("card job kind = %q, want %q", got.Kind, JobApplyPlan)
+	}
+
+	// With nothing but the scan outstanding it is reported as usual, so the card
+	// can tell that no user action is pending and stay interactive.
+	st2, item2 := jobStore(t)
+	if _, err := st2.EnqueueJob(ctx, item2, JobDetectConflicts, JobPayload{}); err != nil {
+		t.Fatal(err)
+	}
+	open2, err := st2.OpenJobsByItem(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := open2[item2]; got.Kind != JobDetectConflicts {
+		t.Fatalf("card job kind = %q, want %q", got.Kind, JobDetectConflicts)
+	}
+}
