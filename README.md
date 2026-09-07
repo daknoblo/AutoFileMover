@@ -188,12 +188,22 @@ In the UI:
 | Azure API version  | `2024-06-01`                               |
 | API key            | your Azure key                             |
 
-- If an **API version** is set, **Azure mode** is used
-  (`/openai/deployments/<model>/chat/completions?api-version=...`, header
-  `api-key`).
-- If the API version stays **empty**, the standard OpenAI path is used
-  (`/v1/chat/completions`, header `Authorization: Bearer ...`). The base URL is then
-  e.g. `https://api.openai.com/v1`.
+The base URL decides which request shape is used:
+
+- `https://<resource>.openai.azure.com` **plus an API version** uses the classic
+  Azure path `/openai/deployments/<model>/chat/completions?api-version=...`.
+- `https://<resource>.services.ai.azure.com/openai/v1` (Azure AI Foundry, the
+  OpenAI-compatible v1 API) uses `<base>/chat/completions` with the deployment
+  name in the request body. **Leave the API version empty** — a value in that
+  field is ignored for v1 endpoints instead of producing an invalid URL.
+- `https://api.openai.com/v1` (or any compatible proxy) uses
+  `<base>/chat/completions`. A URL that already ends in `/chat/completions` is
+  used unchanged.
+
+Requests to `*.azure.com` are authenticated with the `api-key` header, all
+others with a bearer token. Reasoning models such as the GPT-5 family only
+accept their default temperature; AutoFileMover detects the rejection once and
+omits the parameter for that model from then on.
 
 The API key is stored in the database and only shown as "set" in the UI, never
 returned.

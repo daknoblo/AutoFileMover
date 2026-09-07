@@ -26,8 +26,20 @@ All configured paths must stay **inside** `AFM_MEDIA_ROOT` and must exist.
 | Azure version   | `2024-06-01`                             |
 | API key         | stored in the DB, never returned to UI   |
 
-- With an API version set, Azure mode is used (`/openai/deployments/...`).
-- Empty version uses the plain OpenAI path (`/v1/chat/completions`).
+The request shape follows the base URL:
+
+- Azure resource URL **with** an API version →
+  `/openai/deployments/<model>/chat/completions?api-version=...`.
+- Foundry v1 root `https://<resource>.services.ai.azure.com/openai/v1` →
+  `<base>/chat/completions`, deployment in the body, **API version empty** (a
+  leftover value is ignored rather than breaking the URL).
+- `https://api.openai.com/v1` or a compatible proxy → `<base>/chat/completions`;
+  a URL already ending in `/chat/completions` is used unchanged.
+
+Hosts under `*.azure.com` authenticate with the `api-key` header, everything
+else with `Authorization: ****** that only accept their default
+temperature (GPT-5 family, o-series) are detected automatically: the parameter
+is dropped after the first rejection and skipped for that model afterwards.
 
 ## Behaviour
 
