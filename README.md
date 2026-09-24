@@ -140,6 +140,13 @@ The **Queue** tab lists every job with its state, attempt count, next retry and
 error message, and lets you retry or cancel one. A badge in the header shows how
 much work is still outstanding.
 
+**Clean up queue**, next to the Queue heading, removes completed and failed
+jobs as well as orphaned jobs without an item record after confirmation.
+Valid pending jobs and all running jobs are retained. Cleanup never deletes
+media files or history records, and it requests a fresh background source
+check to discard work for missing source entries. It remains responsive even
+if storage is unavailable; source-check failures are shown separately.
+
 Once an action is queued, that card's buttons are **locked** until the worker is
 done with it, so the queue stays the single source of truth for what is still
 outstanding and a second click cannot pile up duplicate work. The card badge

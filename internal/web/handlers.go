@@ -471,7 +471,7 @@ type itemDTO struct {
 }
 
 func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
-	s.scheduleSourceRefresh(s.engine.RefreshSources)
+	s.scheduleSourceRefresh(s.engine.RefreshSources, false)
 	status := r.URL.Query().Get("status")
 	items, err := s.store.ListItems(r.Context(), status, 500)
 	if err != nil {
@@ -867,7 +867,7 @@ type queueResponse struct {
 }
 
 func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
-	s.scheduleSourceRefresh(s.engine.RefreshSources)
+	s.scheduleSourceRefresh(s.engine.RefreshSources, false)
 	jobs, err := s.store.ListJobs(r.Context(), 200)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -885,6 +885,17 @@ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 		Paused:  paused,
 		Message: health.Message,
 	})
+}
+
+func (s *Server) handleClearQueue(w http.ResponseWriter, r *http.Request) {
+	n, err := s.store.ClearQueue(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.scheduleSourceRefresh(s.engine.RefreshSources, true)
+	s.log.Info("queue cleared", "jobs", n)
+	writeJSON(w, http.StatusOK, map[string]int64{"removed": n})
 }
 
 func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {

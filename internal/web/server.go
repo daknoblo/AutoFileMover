@@ -83,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Background queue for filesystem work.
 	mux.HandleFunc("GET /api/queue", s.handleListQueue)
+	mux.HandleFunc("DELETE /api/queue", s.handleClearQueue)
 	mux.HandleFunc("POST /api/queue/{id}/retry", s.handleRetryJob)
 	mux.HandleFunc("DELETE /api/queue/{id}", s.handleDeleteJob)
 

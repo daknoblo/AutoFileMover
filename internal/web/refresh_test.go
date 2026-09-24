@@ -195,9 +195,16 @@ func TestListsRemainAvailableWhileRefreshIsBlocked(t *testing.T) {
 		started <- deadline
 		<-release
 		return nil
-	})
+	}, false)
 	if <-started {
 		t.Fatal("background refresh must not inherit an HTTP deadline")
+	}
+	before := srv.sourceRefreshStatus()
+	if n := clearQueueForTest(t, ts.URL); n != 0 {
+		t.Fatalf("cleanup removed active work: %d", n)
+	}
+	if after := srv.sourceRefreshStatus(); after != before {
+		t.Fatalf("cleanup replaced a running refresh: %+v", after)
 	}
 	client := &http.Client{Timeout: time.Second}
 	for range 3 {
@@ -233,13 +240,13 @@ func TestListsRemainAvailableWhileRefreshIsBlocked(t *testing.T) {
 
 func TestRefreshFailurePersistsUntilSuccessfulRetry(t *testing.T) {
 	_, _, _, srv := testHTTPServer(t)
-	srv.scheduleSourceRefresh(func(context.Context) error { return errors.New("share offline") })
+	srv.scheduleSourceRefresh(func(context.Context) error { return errors.New("share offline") }, false)
 	waitForSourceRefresh(t, srv)
 	failed := srv.sourceRefreshStatus()
 	if failed.Error != "share offline" || failed.FinishedAt.IsZero() || !failed.LastSuccessAt.IsZero() {
 		t.Fatalf("failure status = %+v", failed)
 	}
-	srv.scheduleSourceRefresh(func(context.Context) error { return nil })
+	srv.scheduleSourceRefresh(func(context.Context) error { return nil }, false)
 	if got := srv.sourceRefreshStatus(); got != failed {
 		t.Fatalf("poll restarted refresh without cooldown: %+v", got)
 	}
@@ -250,7 +257,7 @@ func TestRefreshFailurePersistsUntilSuccessfulRetry(t *testing.T) {
 		close(started)
 		<-release
 		return nil
-	})
+	}, false)
 	<-started
 	retrying := srv.sourceRefreshStatus()
 	close(release)

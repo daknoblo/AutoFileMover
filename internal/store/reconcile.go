@@ -16,6 +16,18 @@ func (s *Store) PruneOrphanJobs(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
+// ClearQueue removes finished, failed and orphaned jobs, but never running
+// work or pending jobs attached to an existing item. It does not touch files.
+func (s *Store) ClearQueue(ctx context.Context) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM jobs WHERE status != ?
+		AND (status IN (?, ?) OR NOT EXISTS (SELECT 1 FROM items WHERE items.id = jobs.item_id))`,
+		JobRunning, JobDone, JobFailed)
+	if err != nil {
+		return 0, fmt.Errorf("clear queue: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 // RemoveObsoleteFileJobs retains unclaimed per-file work only for unchanged
 // files. Whole-item plans and the completed-job history stay intact.
 func (s *Store) RemoveObsoleteFileJobs(ctx context.Context, id int64, files []File) error {

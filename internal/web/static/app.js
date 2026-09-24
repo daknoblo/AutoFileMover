@@ -122,21 +122,23 @@ document.getElementById("brandHome").addEventListener("click", () => {
 });
 
 // ---- Items ----
-document.getElementById("clearHistoryBtn").addEventListener("click", async (event) => {
-	if (!confirm(t("clear_history_confirm"))) return;
+document.getElementById("clearHistoryBtn").addEventListener("click", (event) => clearRecords(event, "history"));
+document.getElementById("clearQueueBtn").addEventListener("click", (event) => clearRecords(event, "queue"));
+
+async function clearRecords(event, collection) {
+	if (!confirm(t(`clear_${collection}_confirm`))) return;
 	const button = event.currentTarget;
 	button.disabled = true;
 	try {
-		const result = await api("DELETE", "/history");
-		toast(t("history_cleared").replace("{n}", result.removed));
-		await loadItems();
-		await loadQueue();
+		const result = await api("DELETE", `/${collection}`);
+		toast(t(`${collection}_cleared`).replace("{n}", result.removed));
+		await Promise.all([loadItems(), loadQueue(), loadStatus()]);
 	} catch (e) {
 		toast(e.message, true);
 	} finally {
 		button.disabled = false;
 	}
-});
+}
 
 async function loadItems() {
 	const items = await api("GET", "/items");

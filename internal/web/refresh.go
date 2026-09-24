@@ -23,13 +23,14 @@ type sourceRefresh struct {
 
 // scheduleSourceRefresh never waits for storage. A slow refresh runs to
 // completion instead of being aborted and restarted at every HTTP poll.
-func (s *Server) scheduleSourceRefresh(refresh func(context.Context) error) {
+// Explicit cleanup bypasses the cooldown but still shares any running refresh.
+func (s *Server) scheduleSourceRefresh(refresh func(context.Context) error, force bool) {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	var previous sourceRefreshStatus
 	if s.refresh != nil {
 		previous = s.refresh.status
-		if previous.Running || time.Since(previous.FinishedAt) < sourceRefreshInterval {
+		if previous.Running || (!force && time.Since(previous.FinishedAt) < sourceRefreshInterval) {
 			return
 		}
 	}

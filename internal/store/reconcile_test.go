@@ -107,3 +107,68 @@ func TestPruneLegacyOrphanJobs(t *testing.T) {
 		t.Fatalf("pruned = %d, err = %v", n, err)
 	}
 }
+
+func TestClearQueuePreservesActiveWork(t *testing.T) {
+	st, ctx := testStore(t)
+	want := make(map[int64]string)
+	for _, orphan := range []bool{false, true} {
+		item := &Item{SourcePath: fmt.Sprintf("/source/orphan-%t", orphan), Status: StatusPendingReview}
+		if err := st.UpsertItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		for _, status := range []string{JobDone, JobFailed, JobPending, JobRunning} {
+			job, err := st.EnqueueJob(ctx, item.ID, JobFileAction, JobPayload{RelPath: status})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.db.ExecContext(ctx, `UPDATE jobs SET status = ? WHERE id = ?`, status, job.ID); err != nil {
+				t.Fatal(err)
+			}
+			if status == JobRunning || (!orphan && status == JobPending) {
+				want[job.ID] = status
+			}
+		}
+		if orphan {
+			if _, err := st.db.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, item.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if n, err := st.ClearQueue(ctx); err != nil || n != 5 {
+		t.Fatalf("removed = %d, err = %v; want 5", n, err)
+	}
+	jobs, err := st.ListJobs(ctx, 0)
+	if err != nil || len(jobs) != len(want) {
+		t.Fatalf("remaining jobs = %+v, err = %v", jobs, err)
+	}
+	for _, job := range jobs {
+		if want[job.ID] != job.Status {
+			t.Errorf("unexpected remaining job: %+v", job)
+		}
+	}
+	if items, err := st.ListItems(ctx, "", 0); err != nil || len(items) != 1 {
+		t.Fatalf("cleanup removed item records: %+v, %v", items, err)
+	}
+	if n, err := st.ClearQueue(ctx); err != nil || n != 0 {
+		t.Fatalf("second cleanup = %d, %v", n, err)
+	}
+}
+
+func TestClearQueueBeyondListLimit(t *testing.T) {
+	st, id := jobStore(t)
+	for range 205 {
+		job, err := st.EnqueueJob(t.Context(), id, JobApplyPlan, JobPayload{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CompleteJob(t.Context(), job.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := st.ClearQueue(t.Context()); err != nil || n != 205 {
+		t.Fatalf("removed = %d, err = %v; want 205", n, err)
+	}
+	if jobs, err := st.ListJobs(t.Context(), 0); err != nil || len(jobs) != 0 {
+		t.Fatalf("remaining jobs = %+v, err = %v", jobs, err)
+	}
+}

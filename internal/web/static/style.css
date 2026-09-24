@@ -101,6 +101,15 @@ main { padding: 24px; }
 .panel { display: none; max-width: 980px; }
 .panel.active { display: block; }
 
+#history.panel, #queue.panel { max-width: none; }
+#history .cards, #queue .cards, #queue .hint, #queue .queue-paused { max-width: 980px; }
+.panel-heading {
+	display: flex; align-items: center; justify-content: space-between;
+	gap: 12px; flex-wrap: wrap; margin-bottom: 20px;
+}
+.panel-heading h2 { margin: 0; }
+.panel-heading .btn { margin-left: auto; }
+
 /* Review uses the available width: each detected folder is wide enough that
    file names never wrap (left-anchored, capped so it stays sane on wide screens). */
 #review.panel { max-width: none; }
@@ -455,5 +464,4 @@ textarea {
 .picker-selected code { color: var(--text); }
 .picker-desc { display: flex; flex-direction: column; gap: 6px; font-size: 14px; margin-top: 8px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-
 
