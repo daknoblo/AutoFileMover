@@ -1,19 +1,43 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/daknoblo/AutoFileMover/internal/store"
 )
 
-func TestListRefreshesFilesystemBeforeResponding(t *testing.T) {
+func waitForSourceRefresh(t *testing.T, srv *Server) {
+	t.Helper()
+	srv.refreshMu.Lock()
+	call := srv.refresh
+	srv.refreshMu.Unlock()
+	if call == nil {
+		t.Fatal("no refresh scheduled")
+	}
+	select {
+	case <-call.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refresh did not finish")
+	}
+}
+
+func expireSourceRefresh(srv *Server) {
+	srv.refreshMu.Lock()
+	defer srv.refreshMu.Unlock()
+	srv.refresh.status.FinishedAt = time.Now().Add(-sourceRefreshInterval)
+}
+
+func TestListRefreshesFilesystemInBackground(t *testing.T) {
 	for _, endpoint := range []string{"/items", "/queue"} {
 		t.Run(endpoint, func(t *testing.T) {
-			ts, st, dir := testHTTP(t)
+			ts, st, dir, srv := testHTTPServer(t)
 			source := filepath.Join(dir, "downloads")
 			if err := os.Mkdir(source, 0o755); err != nil {
 				t.Fatal(err)
@@ -60,9 +84,13 @@ func TestListRefreshesFilesystemBeforeResponding(t *testing.T) {
 			if entries := readList(); len(entries) != 1 {
 				t.Fatalf("before deletion = %d, want 1", len(entries))
 			}
+			waitForSourceRefresh(t, srv)
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
+			expireSourceRefresh(srv)
+			readList()
+			waitForSourceRefresh(t, srv)
 			if entries := readList(); len(entries) != 0 {
 				t.Fatalf("after deletion = %d, want 0", len(entries))
 			}
@@ -75,7 +103,7 @@ func TestListRefreshesFilesystemBeforeResponding(t *testing.T) {
 }
 
 func TestListReportsUnavailableSource(t *testing.T) {
-	ts, st, dir := testHTTP(t)
+	ts, st, dir, srv := testHTTPServer(t)
 	source := filepath.Join(dir, "unavailable")
 	if _, err := st.AddSource(t.Context(), source); err != nil {
 		t.Fatal(err)
@@ -89,11 +117,20 @@ func TestListReportsUnavailableSource(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var body map[string]string
-		err = json.NewDecoder(resp.Body).Decode(&body)
 		_ = resp.Body.Close()
-		if err != nil || resp.StatusCode != http.StatusInternalServerError || body["error"] == "" {
-			t.Fatalf("response = %d, %+v, %v", resp.StatusCode, body, err)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("list unavailable: %d", resp.StatusCode)
+		}
+		waitForSourceRefresh(t, srv)
+		resp, err = http.Get(ts.URL + "/api/status")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var status statusDTO
+		err = json.NewDecoder(resp.Body).Decode(&status)
+		_ = resp.Body.Close()
+		if err != nil || status.SourceRefresh.Error == "" || status.SourceRefresh.Running {
+			t.Fatalf("missing refresh error: %+v, %v", status.SourceRefresh, err)
 		}
 	}
 	if got, err := st.GetItem(t.Context(), item.ID); err != nil || got == nil {
@@ -138,5 +175,91 @@ func TestClearHistoryOnlyRemovesRecords(t *testing.T) {
 	}
 	if data, err := os.ReadFile(path); err != nil || string(data) != "keep" {
 		t.Fatalf("cleanup touched files: %q, %v", data, err)
+	}
+}
+
+func TestListsRemainAvailableWhileRefreshIsBlocked(t *testing.T) {
+	ts, st, dir, srv := testHTTPServer(t)
+	item := &store.Item{SourcePath: filepath.Join(dir, "cached"), Status: store.StatusPendingReview}
+	if err := st.UpsertItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnqueueJob(t.Context(), item.ID, store.JobApplyPlan, store.JobPayload{}); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan bool, 1)
+	release := make(chan struct{})
+	defer close(release)
+	srv.scheduleSourceRefresh(func(ctx context.Context) error {
+		_, deadline := ctx.Deadline()
+		started <- deadline
+		<-release
+		return nil
+	})
+	if <-started {
+		t.Fatal("background refresh must not inherit an HTTP deadline")
+	}
+	client := &http.Client{Timeout: time.Second}
+	for range 3 {
+		for _, endpoint := range []string{"/items", "/queue", "/status"} {
+			resp, err := client.Get(ts.URL + "/api" + endpoint)
+			if err != nil {
+				t.Fatalf("%s blocked on filesystem I/O: %v", endpoint, err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("%s status = %d", endpoint, resp.StatusCode)
+			}
+			switch endpoint {
+			case "/items":
+				var items []itemDTO
+				if err := json.NewDecoder(resp.Body).Decode(&items); err != nil || len(items) != 1 {
+					t.Errorf("cached items not served: %+v, %v", items, err)
+				}
+			case "/queue":
+				var queue queueResponse
+				if err := json.NewDecoder(resp.Body).Decode(&queue); err != nil || len(queue.Jobs) != 1 || queue.Counts.Pending != 1 {
+					t.Errorf("cached queue not served: %+v, %v", queue, err)
+				}
+			case "/status":
+				var status statusDTO
+				if err := json.NewDecoder(resp.Body).Decode(&status); err != nil || !status.SourceRefresh.Running {
+					t.Errorf("refresh status not reported: %+v, %v", status.SourceRefresh, err)
+				}
+			}
+			_ = resp.Body.Close()
+		}
+	}
+}
+
+func TestRefreshFailurePersistsUntilSuccessfulRetry(t *testing.T) {
+	_, _, _, srv := testHTTPServer(t)
+	srv.scheduleSourceRefresh(func(context.Context) error { return errors.New("share offline") })
+	waitForSourceRefresh(t, srv)
+	failed := srv.sourceRefreshStatus()
+	if failed.Error != "share offline" || failed.FinishedAt.IsZero() || !failed.LastSuccessAt.IsZero() {
+		t.Fatalf("failure status = %+v", failed)
+	}
+	srv.scheduleSourceRefresh(func(context.Context) error { return nil })
+	if got := srv.sourceRefreshStatus(); got != failed {
+		t.Fatalf("poll restarted refresh without cooldown: %+v", got)
+	}
+	expireSourceRefresh(srv)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	srv.scheduleSourceRefresh(func(context.Context) error {
+		close(started)
+		<-release
+		return nil
+	})
+	<-started
+	retrying := srv.sourceRefreshStatus()
+	close(release)
+	if !retrying.Running || retrying.Error != "share offline" {
+		t.Fatalf("retry hid previous failure: %+v", retrying)
+	}
+	waitForSourceRefresh(t, srv)
+	success := srv.sourceRefreshStatus()
+	if success.Running || success.Error != "" || success.LastSuccessAt.IsZero() {
+		t.Fatalf("successful refresh status = %+v", success)
 	}
 }

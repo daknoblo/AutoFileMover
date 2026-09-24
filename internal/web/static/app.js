@@ -56,11 +56,6 @@ async function api(method, path, body) {
 	setConnected(true);
 	if (res.status === 204) return null;
 	const data = await res.json().catch(() => null);
-	if (method === "GET" && (path === "/items" || path === "/queue")) {
-		const warning = document.getElementById("filesystemError");
-		warning.hidden = res.ok;
-		warning.textContent = res.ok ? "" : `${t("refresh_failed")} ${data && data.error ? data.error : "HTTP " + res.status}`;
-	}
 	if (!res.ok) throw new Error(data && data.error ? data.error : "HTTP " + res.status);
 	return data;
 }
@@ -769,9 +764,25 @@ async function loadStatus() {
 		document.getElementById("fsText").textContent = p.fs_writable ? t("fs_ok") : t("fs_bad");
 		renderQueueBadge(p);
 		syncCardsWithQueue(p);
+		renderSourceRefresh(p.source_refresh);
 	} catch (_) {
 		// Keep the last known status on screen; the offline badge already tells
 		// the user the values may be stale.
+	}
+}
+
+let lastSourceRefresh = "";
+function renderSourceRefresh(refresh) {
+	if (!refresh) return;
+	const warning = document.getElementById("filesystemError");
+	warning.hidden = !refresh.running && !refresh.error;
+	warning.textContent = refresh.error
+		? `${t("refresh_failed")} ${refresh.error}`
+		: refresh.running ? t("refresh_running") : "";
+	if (refresh.finished_at && refresh.finished_at !== lastSourceRefresh && !pickerOpen()) {
+		lastSourceRefresh = refresh.finished_at;
+		loadItems().catch((e) => toast(e.message, true));
+		if (document.getElementById("queue").classList.contains("active")) loadQueue();
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/daknoblo/AutoFileMover/internal/config"
 	"github.com/daknoblo/AutoFileMover/internal/engine"
@@ -73,6 +74,12 @@ func TestResolveWithinMediaRootRebuildsPath(t *testing.T) {
 
 func testHTTP(t *testing.T) (*httptest.Server, *store.Store, string) {
 	t.Helper()
+	ts, st, dir, _ := testHTTPServer(t)
+	return ts, st, dir
+}
+
+func testHTTPServer(t *testing.T) (*httptest.Server, *store.Store, string, *Server) {
+	t.Helper()
 	dir := t.TempDir()
 	// The server resolves symlinks in the media root; on macOS the temp dir is
 	// itself a symlink (/var -> /private/var), so resolve it up front to keep
@@ -93,9 +100,19 @@ func testHTTP(t *testing.T) (*httptest.Server, *store.Store, string) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() {
 		ts.Close()
+		srv.refreshMu.Lock()
+		call := srv.refresh
+		srv.refreshMu.Unlock()
+		if call != nil {
+			select {
+			case <-call.done:
+			case <-time.After(5 * time.Second):
+				t.Error("background refresh did not finish")
+			}
+		}
 		_ = st.Close()
 	})
-	return ts, st, dir
+	return ts, st, dir, srv
 }
 
 func putJSON(t *testing.T, rawURL, body string) *http.Response {

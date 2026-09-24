@@ -40,15 +40,14 @@ func (e *Engine) RefreshSources(ctx context.Context) error {
 
 func (e *Engine) reconcileSource(ctx context.Context, sourcePath string) error {
 	// Failure to read a source is not evidence that its children were deleted.
-	entries, err := os.ReadDir(sourcePath)
-	if err != nil {
+	if _, err := os.ReadDir(sourcePath); err != nil {
 		return fmt.Errorf("refresh source %s: %w", sourcePath, err)
 	}
-	present := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		present[entry.Name()] = true
-	}
 	items, err := e.store.ListItems(ctx, "", 0)
+	if err != nil {
+		return err
+	}
+	jobs, err := e.store.OpenJobsByItem(ctx)
 	if err != nil {
 		return err
 	}
@@ -60,8 +59,10 @@ func (e *Engine) reconcileSource(ctx context.Context, sourcePath string) error {
 		if filepath.Dir(item.SourcePath) != filepath.Clean(sourcePath) {
 			continue
 		}
-		if item.IsHistory() && present[filepath.Base(item.SourcePath)] {
-			continue
+		if item.IsHistory() {
+			if _, hasWork := jobs[item.ID]; !hasWork {
+				continue
+			}
 		}
 		if err := e.refreshItem(ctx, item.ID); err != nil {
 			errs = append(errs, fmt.Errorf("refresh %s: %w", item.SourcePath, err))

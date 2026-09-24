@@ -76,8 +76,8 @@ explicitly via "AI match".
 
 ### Keeping source listings current
 
-Scans and list refreshes reconcile stored entries with a fresh filesystem read,
-without making extra AI calls or moving files. Missing review/error entries and
+Scans and background list refreshes reconcile stored entries with a fresh
+filesystem read, without making extra AI calls or moving files. Missing review/error entries and
 their queued jobs are removed, including when the source folder is completely
 empty. Existing folders get an updated file list: unchanged files keep their
 review decisions, while new or size-changed files require review. Completed
@@ -87,8 +87,13 @@ currently being processed are reconciled on a subsequent refresh.
 
 An unreadable or unavailable source is not treated as empty. Refresh failures
 are shown in the UI and logged; no missing-entry cleanup is performed for that
-source. Reads have a bounded HTTP wait and concurrent polls share one in-flight
-refresh, so a stalled share cannot accumulate refresh tasks.
+source. List requests return the last saved state immediately and schedule a
+shared background refresh, at most once every ten seconds after completion.
+A slow refresh runs to completion without a five-second HTTP deadline, and
+concurrent polls never start additional refresh tasks. The UI marks the lists
+as potentially stale while a refresh runs or has failed, and reloads them when
+it finishes. Completed history without outstanding jobs does not require
+per-item filesystem reads.
 
 Completed, rejected and skipped items remain in **History**. **Clear history**
 removes these database records and their jobs after confirmation, but never

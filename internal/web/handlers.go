@@ -198,21 +198,23 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 // counters the header badge shows.
 type statusDTO struct {
 	engine.Progress
-	FSWritable   bool   `json:"fs_writable"`
-	FSMessage    string `json:"fs_message"`
-	QueuePending int    `json:"queue_pending"`
-	QueueRunning int    `json:"queue_running"`
-	QueueFailed  int    `json:"queue_failed"`
-	QueuePaused  bool   `json:"queue_paused"`
+	FSWritable    bool                `json:"fs_writable"`
+	FSMessage     string              `json:"fs_message"`
+	QueuePending  int                 `json:"queue_pending"`
+	QueueRunning  int                 `json:"queue_running"`
+	QueueFailed   int                 `json:"queue_failed"`
+	QueuePaused   bool                `json:"queue_paused"`
+	SourceRefresh sourceRefreshStatus `json:"source_refresh"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	health, paused := s.queue.Health()
 	dto := statusDTO{
-		Progress:    s.engine.GetProgress(),
-		FSWritable:  health.Writable,
-		FSMessage:   health.Message,
-		QueuePaused: paused,
+		Progress:      s.engine.GetProgress(),
+		FSWritable:    health.Writable,
+		FSMessage:     health.Message,
+		QueuePaused:   paused,
+		SourceRefresh: s.sourceRefreshStatus(),
 	}
 	if counts, err := s.store.CountJobs(r.Context()); err != nil {
 		s.log.Warn("count jobs", "err", err)
@@ -469,10 +471,7 @@ type itemDTO struct {
 }
 
 func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
-	if err := s.refreshSources(r.Context()); err != nil {
-		writeFSErr(w, err)
-		return
-	}
+	s.scheduleSourceRefresh(s.engine.RefreshSources)
 	status := r.URL.Query().Get("status")
 	items, err := s.store.ListItems(r.Context(), status, 500)
 	if err != nil {
@@ -868,10 +867,7 @@ type queueResponse struct {
 }
 
 func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
-	if err := s.refreshSources(r.Context()); err != nil {
-		writeFSErr(w, err)
-		return
-	}
+	s.scheduleSourceRefresh(s.engine.RefreshSources)
 	jobs, err := s.store.ListJobs(r.Context(), 200)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

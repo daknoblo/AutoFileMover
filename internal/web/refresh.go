@@ -3,44 +3,71 @@ package web
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
-type sourceRefresh struct {
-	done chan struct{}
-	err  error
+const sourceRefreshInterval = 10 * time.Second
+
+type sourceRefreshStatus struct {
+	Running       bool      `json:"running"`
+	StartedAt     time.Time `json:"started_at,omitzero"`
+	FinishedAt    time.Time `json:"finished_at,omitzero"`
+	LastSuccessAt time.Time `json:"last_success_at,omitzero"`
+	Error         string    `json:"error,omitempty"`
 }
 
-// refreshSources shares in-flight reads between pollers. A stuck filesystem
-// syscall can outlive the deadline, but cannot spawn more refresh goroutines.
-func (s *Server) refreshSources(parent context.Context) error {
-	s.refreshMu.Lock()
-	call := s.refresh
-	if call == nil {
-		call = &sourceRefresh{done: make(chan struct{})}
-		s.refresh = call
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), fsReadTimeout)
-			defer cancel()
-			call.err = s.engine.RefreshSources(ctx)
-			if call.err != nil {
-				s.log.Warn("refresh source listings", "err", call.err)
-			}
-			s.refreshMu.Lock()
-			close(call.done)
-			s.refresh = nil
-			s.refreshMu.Unlock()
-		}()
-	}
-	s.refreshMu.Unlock()
+type sourceRefresh struct {
+	done   chan struct{}
+	status sourceRefreshStatus
+}
 
-	ctx, cancel := context.WithTimeout(parent, fsReadTimeout)
-	defer cancel()
-	select {
-	case <-call.done:
-		return call.err
-	case <-ctx.Done():
-		return ctx.Err()
+// scheduleSourceRefresh never waits for storage. A slow refresh runs to
+// completion instead of being aborted and restarted at every HTTP poll.
+func (s *Server) scheduleSourceRefresh(refresh func(context.Context) error) {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	var previous sourceRefreshStatus
+	if s.refresh != nil {
+		previous = s.refresh.status
+		if previous.Running || time.Since(previous.FinishedAt) < sourceRefreshInterval {
+			return
+		}
 	}
+	call := &sourceRefresh{
+		done: make(chan struct{}),
+		status: sourceRefreshStatus{
+			Running: true, StartedAt: time.Now().UTC(),
+			FinishedAt: previous.FinishedAt, LastSuccessAt: previous.LastSuccessAt,
+			Error: previous.Error,
+		},
+	}
+	s.refresh = call
+	go func() {
+		err := refresh(context.Background())
+		if err != nil {
+			s.log.Warn("refresh source listings", "err", err)
+		}
+		s.refreshMu.Lock()
+		defer s.refreshMu.Unlock()
+		call.status.Running = false
+		call.status.FinishedAt = time.Now().UTC()
+		if err != nil {
+			call.status.Error = err.Error()
+		} else {
+			call.status.Error = ""
+			call.status.LastSuccessAt = call.status.FinishedAt
+		}
+		close(call.done)
+	}()
+}
+
+func (s *Server) sourceRefreshStatus() sourceRefreshStatus {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	if s.refresh == nil {
+		return sourceRefreshStatus{}
+	}
+	return s.refresh.status
 }
 
 func (s *Server) handleClearHistory(w http.ResponseWriter, r *http.Request) {
