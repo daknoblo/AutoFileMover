@@ -12,6 +12,7 @@ import (
 
 	"github.com/daknoblo/AutoFileMover/internal/ai"
 	"github.com/daknoblo/AutoFileMover/internal/config"
+	"github.com/daknoblo/AutoFileMover/internal/foundry"
 	"github.com/daknoblo/AutoFileMover/internal/mover"
 	"github.com/daknoblo/AutoFileMover/internal/scanner"
 	"github.com/daknoblo/AutoFileMover/internal/store"
@@ -22,6 +23,10 @@ type Engine struct {
 	store *store.Store
 	cfg   config.Config
 	log   *slog.Logger
+	// foundry resolves the AI endpoint and the selectable deployments from
+	// Azure when an identity is configured. It is shared with the web layer so
+	// the settings page and a scan see the same cached discovery.
+	foundry *foundry.Provider
 	// locks serializes work per item (keyed by source path) so a slow scan,
 	// AI call or file operation on one item never blocks actions on another.
 	locks *itemLocks
@@ -35,7 +40,44 @@ type Engine struct {
 
 // New creates a new engine.
 func New(st *store.Store, cfg config.Config, log *slog.Logger) *Engine {
-	return &Engine{store: st, cfg: cfg, log: log, locks: newItemLocks()}
+	return &Engine{store: st, cfg: cfg, log: log,
+		foundry: foundry.NewProvider(cfg.Foundry), locks: newItemLocks()}
+}
+
+// Foundry returns the shared Azure discovery provider.
+func (e *Engine) Foundry() *foundry.Provider { return e.foundry }
+
+// aiConfig resolves the effective chat configuration. In Foundry mode the
+// endpoint and the sampling constraints come from the discovered deployment,
+// and a short-lived token replaces the stored API key.
+func (e *Engine) aiConfig(ctx context.Context, settings store.AppSettings) (ai.Config, error) {
+	cfg := ai.Config{Logger: e.log}
+	if !e.foundry.Enabled() {
+		cfg.BaseURL, cfg.APIKey = settings.AIBaseURL, settings.AIAPIKey
+		cfg.Model, cfg.APIVersion = settings.AIModel, settings.AIAPIVersion
+		return cfg, nil
+	}
+	snapshot, err := e.foundry.Catalog(ctx, false)
+	if err != nil {
+		return ai.Config{}, err
+	}
+	deployment, ok := snapshot.Find(strings.TrimSpace(settings.AIModel))
+	if !ok {
+		return ai.Config{}, fmt.Errorf("select an available Azure Foundry chat deployment in the settings")
+	}
+	cfg.BaseURL, cfg.Model = snapshot.Endpoint, deployment.Name
+	cfg.Reasoning, cfg.Authorize = deployment.Reasoning, e.foundry.Authorize
+	return cfg, nil
+}
+
+// AIClient builds the chat client for the given settings. It reports why no
+// usable endpoint could be resolved, so the settings page can show the reason.
+func (e *Engine) AIClient(ctx context.Context, settings store.AppSettings) (*ai.Client, error) {
+	cfg, err := e.aiConfig(ctx, settings)
+	if err != nil {
+		return nil, err
+	}
+	return ai.New(cfg), nil
 }
 
 // scanContext caches the per-scan inputs that would otherwise be re-loaded from
@@ -66,17 +108,19 @@ func (e *Engine) newScanContext(ctx context.Context) (*scanContext, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A failing Azure discovery must not abort the scan: detection and the
+	// review queue keep working, and the unconfigured client simply routes
+	// every candidate to manual review.
+	client, err := e.AIClient(ctx, settings)
+	if err != nil {
+		e.log.Warn("resolve ai endpoint", "err", err)
+		client = ai.New(ai.Config{Logger: e.log})
+	}
 	return &scanContext{
 		settings: settings,
 		libs:     libs,
-		client: ai.New(ai.Config{
-			BaseURL:    settings.AIBaseURL,
-			APIKey:     settings.AIAPIKey,
-			Model:      settings.AIModel,
-			APIVersion: settings.AIAPIVersion,
-			Logger:     e.log,
-		}),
-		subs: map[string][]string{},
+		client:   client,
+		subs:     map[string][]string{},
 	}, nil
 }
 

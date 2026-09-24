@@ -214,6 +214,33 @@ In the UI:
 
 ## Configuring the AI endpoint (Azure AI Foundry / Azure OpenAI)
 
+AutoFileMover reaches its model in one of two ways. **Foundry mode** discovers
+the endpoint and the usable deployments from Azure, **manual mode** takes them
+from the settings page. Both are configured in the **Settings** tab, where a
+**Test connection** button verifies the stored configuration against the live
+endpoint and reports the reason when it fails.
+
+### Foundry mode (discovered from Azure)
+
+Set the four identity variables below and AutoFileMover resolves the account's
+OpenAI v1 endpoint itself and offers every chat-capable deployment in a
+dropdown; **Reload deployments** refreshes that list. There is no endpoint,
+API version or API key to enter, because requests are signed with a short-lived
+Entra token instead of a stored key.
+
+The service principal needs the **Reader** role on the Cognitive Services
+account (to list deployments) and **Cognitive Services OpenAI User** (to run
+inference). Only deployments that Azure reports as provisioned and
+chat-capable appear; embedding, image, audio, batch and responses-only
+deployments are filtered out. Models that accept no custom temperature, such as
+the GPT-5 and o-series families, are recognised from the deployment metadata, so
+no request is wasted discovering the rejection.
+
+### Manual mode (typed in)
+
+With none of the Azure identity variables set, the settings page keeps the
+classic fields:
+
 | Field              | Example                                    |
 | ------------------ | ------------------------------------------ |
 | Base URL           | `https://<resource>.openai.azure.com`      |
@@ -239,7 +266,9 @@ accept their default temperature; AutoFileMover detects the rejection once and
 omits the parameter for that model from then on.
 
 The API key is stored in the database and only shown as "set" in the UI, never
-returned.
+returned. The endpoint is user-configurable, so redirects are refused — the
+credential never follows a redirect to another host — and an upstream error is
+shortened and stripped of control characters before it is shown.
 
 ## Configuration (environment variables)
 
@@ -251,6 +280,23 @@ returned.
 | `AFM_STABILITY_WINDOW`  | `30s`                         | Quiet period before a download is processed          |
 | `AFM_SCAN_INTERVAL`     | `5m`                          | Fallback interval for periodic scans                 |
 | `AFM_LOG_LEVEL`         | `info`                        | `debug`, `info`, `warn`, `error`                     |
+
+### Azure AI Foundry identity (optional)
+
+Setting any of these switches the AI endpoint into Foundry mode. Each variable
+is also accepted with the project prefix (`AFM_AZURE_RESOURCE_ID` and so on),
+which takes precedence over the conventional Azure spelling.
+
+| Variable               | Description                                                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `AZURE_RESOURCE_ID`    | Account resource ID: `/subscriptions/<id>/resourceGroups/<group>/providers/Microsoft.CognitiveServices/accounts/<account>`    |
+| `AZURE_TENANT_ID`      | Entra tenant ID (UUID)                                                                                                        |
+| `AZURE_CLIENT_ID`      | Application/client ID of the service principal (UUID)                                                                         |
+| `AZURE_CLIENT_SECRET`  | **Secret.** Client secret, supplied through the environment only — it is never written to the database or returned by the API |
+
+Use the **account** resource ID, not a Foundry project URL. An incomplete
+identity still enables Foundry mode and reports what is missing in the settings
+page, rather than silently falling back to the manual fields.
 
 Application settings (AI config, threshold, sources, libraries) are stored in the
 database and managed through the UI.
@@ -290,7 +336,11 @@ The full documentation is published at
 ## Security
 
 - No built-in authentication — run it behind a reverse proxy or VPN.
-- The API key is stored in the database and never returned to the UI.
+- The API key is stored in the database and never returned to the UI. The Azure
+  client secret is read from the environment only and is never persisted.
+- The AI endpoint is user-configurable, so its credential never follows a
+  redirect, and Azure discovery only trusts an endpoint that belongs to the
+  configured account.
 - Paths are validated against `AFM_MEDIA_ROOT`; file actions only apply to
   already scanned files. Deletion is permanent (use what-if first).
 - The container runs as a non-root distroless image with its own healthcheck.
@@ -317,6 +367,7 @@ cmd/afm-demo/         # seeded demo instance (screenshots, playground)
 internal/config/      # env configuration
 internal/store/       # SQLite (settings, sources, libraries, items)
 internal/ai/          # OpenAI/Azure compatible client + classifier
+internal/foundry/     # Azure AI Foundry deployment discovery (Entra identity)
 internal/scanner/     # download detection & file reading
 internal/mover/       # moving with cross-device fallback
 internal/engine/      # orchestration: scan → classify → decide → move/queue

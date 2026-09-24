@@ -12,6 +12,7 @@ into the matching library.
 | `internal/config`   | Environment configuration.                                        |
 | `internal/store`    | SQLite (settings, sources, libraries, items, folder notes, jobs). |
 | `internal/ai`       | OpenAI/Azure-compatible client + classifier (per-file decisions). |
+| `internal/foundry`  | Azure AI Foundry deployment discovery via an Entra identity.      |
 | `internal/scanner`  | Detects stable downloads, lists all contained files.              |
 | `internal/mover`    | Move (cross-device safe), delete, remove-if-empty.                |
 | `internal/engine`   | Orchestrates scan → classify → plan → execute.                    |

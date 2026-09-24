@@ -281,6 +281,22 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// In Foundry mode the model field holds a discovered deployment name, so a
+	// value that Azure does not expose for chat is rejected instead of being
+	// stored and failing silently on the next scan.
+	if model := strings.TrimSpace(dto.AIModel); model != "" && s.engine.Foundry().Enabled() {
+		ctx, cancel := context.WithTimeout(r.Context(), foundryTimeout)
+		defer cancel()
+		snapshot, ferr := s.engine.Foundry().Catalog(ctx, false)
+		if ferr != nil {
+			writeErr(w, http.StatusServiceUnavailable, ferr.Error())
+			return
+		}
+		if _, ok := snapshot.Find(model); !ok {
+			writeErr(w, http.StatusBadRequest, "the selected deployment is not available for chat")
+			return
+		}
+	}
 	err := s.store.SaveAppSettings(r.Context(), store.AppSettings{
 		AIBaseURL:      strings.TrimSpace(dto.AIBaseURL),
 		AIModel:        strings.TrimSpace(dto.AIModel),

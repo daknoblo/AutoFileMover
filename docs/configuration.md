@@ -17,7 +17,33 @@ and stored in the SQLite database.
 
 All configured paths must stay **inside** `AFM_MEDIA_ROOT` and must exist.
 
+### Azure AI Foundry identity (optional)
+
+Setting any of these switches the AI endpoint into Foundry mode: the endpoint
+and the selectable deployments are discovered from Azure instead of being typed
+in. Each variable is also accepted with the project prefix
+(`AFM_AZURE_RESOURCE_ID` and so on), which takes precedence.
+
+| Variable              | Description                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `AZURE_RESOURCE_ID`   | Account resource ID: `/subscriptions/<id>/resourceGroups/<group>/providers/Microsoft.CognitiveServices/accounts/<account>` |
+| `AZURE_TENANT_ID`     | Entra tenant ID (UUID).                                                                                                    |
+| `AZURE_CLIENT_ID`     | Application/client ID of the service principal (UUID).                                                                     |
+| `AZURE_CLIENT_SECRET` | **Secret.** Environment only; never written to the database or returned by the API.                                        |
+
+The service principal needs **Reader** on the account to list deployments and
+**Cognitive Services OpenAI User** to run inference.
+
 ## AI endpoint (Azure AI Foundry / Azure OpenAI / OpenAI)
+
+In **Foundry mode** the settings page shows the discovered endpoint and a
+dropdown of every chat-capable deployment, with a **Reload deployments** button.
+Embedding, image, audio, batch and responses-only deployments are filtered out,
+and models that accept no custom temperature are recognised from their metadata.
+Requests are signed with a short-lived Entra token, so no endpoint, API version
+or API key is entered.
+
+With none of the Azure variables set, the classic fields apply:
 
 | Field           | Example                                  |
 | --------------- | ---------------------------------------- |
@@ -40,6 +66,11 @@ Hosts under `*.azure.com` authenticate with the `api-key` header, everything
 else with `Authorization: ****** that only accept their default
 temperature (GPT-5 family, o-series) are detected automatically: the parameter
 is dropped after the first rejection and skipped for that model afterwards.
+
+Both modes offer a **Test connection** button that verifies the stored
+configuration against the live endpoint. Because the endpoint is
+user-configurable, its credential never follows a redirect, and an upstream
+error is shortened and stripped of control characters before it is displayed.
 
 ## Behaviour
 

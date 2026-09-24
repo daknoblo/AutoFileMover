@@ -582,6 +582,11 @@ document.getElementById("addLibraryBtn").addEventListener("click", () => openPic
 
 // ---- Settings ----
 let dryRunActive = false;
+let foundryEnabled = false;
+let foundryDeployments = [];
+let foundryStatus = null;
+let selectedDeployment = "";
+
 async function loadSettings() {
 	const s = await api("GET", "/settings");
 	document.getElementById("aiBaseUrl").value = s.ai_base_url || "";
@@ -594,7 +599,88 @@ async function loadSettings() {
 	document.getElementById("ignorePatterns").value = (s.ignore_patterns || "");
 	document.getElementById("keyHint").textContent = s.has_api_key ? t("key_saved") : t("key_unset");
 	applyDryRun(!!s.dry_run);
+	selectedDeployment = s.ai_model || "";
+	// Azure discovery can take seconds, so the rest of the page must not wait
+	// for it. The deployment list fills in as soon as the answer arrives.
+	loadFoundry(false).catch((e) => toast(e.message, true));
 }
+
+// loadFoundry reports whether the AI endpoint is discovered from Azure and, if
+// so, which chat deployments the configured identity may use.
+async function loadFoundry(force) {
+	const meta = document.getElementById("foundryMeta");
+	if (force) meta.textContent = t("ai_deployments_loading");
+	const status = await api(force ? "POST" : "GET", force ? "/foundry/refresh" : "/foundry");
+	foundryEnabled = !!status.enabled;
+	foundryDeployments = status.deployments || [];
+	document.getElementById("foundryBlock").hidden = !foundryEnabled;
+	document.getElementById("refreshFoundryBtn").hidden = !foundryEnabled;
+	document.getElementById("manualBlock").hidden = foundryEnabled;
+	if (foundryEnabled) renderDeployments(status);
+}
+
+function renderDeployments(status) {
+	foundryStatus = status;
+	const select = document.getElementById("aiDeployment");
+	select.replaceChildren(el("option", { value: "", text: t("ai_deployment_none") }));
+	foundryDeployments.forEach((d) => {
+		const model = d.model_name ? ` · ${d.model_name}` : "";
+		const reasoning = d.reasoning ? ` · ${t("ai_reasoning")}` : "";
+		select.appendChild(el("option", { value: d.name, text: d.name + model + reasoning }));
+	});
+	// A stored deployment that Azure no longer offers must stay visible, so the
+	// field never silently changes what the next scan will use.
+	if (selectedDeployment && !foundryDeployments.some((d) => d.name === selectedDeployment)) {
+		select.appendChild(el("option", {
+			value: selectedDeployment,
+			text: `${selectedDeployment} · ${t("ai_deployment_missing")}`,
+		}));
+	}
+	select.value = selectedDeployment;
+
+	const meta = document.getElementById("foundryMeta");
+	meta.textContent = status.endpoint
+		? `${status.endpoint} · ${t("ai_deployment_count").replace("{n}", foundryDeployments.length)}`
+		: (status.resource_id || "");
+	const error = document.getElementById("foundryError");
+	error.hidden = !status.error;
+	error.textContent = status.error || "";
+}
+
+document.getElementById("refreshFoundryBtn").addEventListener("click", async (event) => {
+	const button = event.currentTarget;
+	button.disabled = true;
+	try {
+		await loadFoundry(true);
+	} catch (e) {
+		toast(e.message, true);
+	} finally {
+		button.disabled = false;
+	}
+});
+
+// The endpoint is tested as it is stored, so the pending edits are saved first.
+document.getElementById("testAiBtn").addEventListener("click", async (event) => {
+	const button = event.currentTarget;
+	const result = document.getElementById("aiTestResult");
+	button.disabled = true;
+	result.className = "test-result";
+	result.textContent = t("ai_test_running");
+	try {
+		clearTimeout(saveTimer);
+		await saveSettings(true);
+		const answer = await api("POST", "/ai/test");
+		result.classList.add(answer.ok ? "ok" : "bad");
+		result.textContent = answer.ok
+			? t("ai_test_ok").replace("{ms}", answer.duration_ms ?? 0)
+			: `${t("ai_test_failed")} ${answer.error || ""}`.trim();
+	} catch (e) {
+		result.classList.add("bad");
+		result.textContent = `${t("ai_test_failed")} ${e.message}`.trim();
+	} finally {
+		button.disabled = false;
+	}
+});
 
 function applyDryRun(enabled) {
 	dryRunActive = enabled;
@@ -618,10 +704,12 @@ document.getElementById("threshold").addEventListener("input", (e) => {
 	document.getElementById("thresholdValue").textContent = e.target.value + "%";
 });
 
-async function saveSettings() {
+async function saveSettings(silent) {
 	const body = {
 		ai_base_url: document.getElementById("aiBaseUrl").value.trim(),
-		ai_model: document.getElementById("aiModel").value.trim(),
+		ai_model: foundryEnabled
+			? document.getElementById("aiDeployment").value
+			: document.getElementById("aiModel").value.trim(),
 		ai_api_version: document.getElementById("aiApiVersion").value.trim(),
 		threshold: parseInt(document.getElementById("threshold").value, 10) / 100,
 		auto_move: document.getElementById("autoMove").checked,
@@ -632,27 +720,32 @@ async function saveSettings() {
 	if (key) body.ai_api_key = key;
 	try {
 		await api("PUT", "/settings", body);
+		selectedDeployment = body.ai_model;
 		if (key) {
 			document.getElementById("aiApiKey").value = "";
 			document.getElementById("keyHint").textContent = t("key_saved");
 		}
-		toast(t("saved"));
+		if (!silent) toast(t("saved"));
 	} catch (err) {
-		toast(err.message, true);
+		// A silent save is reported by its caller, which shows the reason next
+		// to the button instead of raising a second toast.
+		if (!silent) toast(err.message, true);
+		throw err;
 	}
 }
 
 let saveTimer;
 function autoSave() {
 	clearTimeout(saveTimer);
-	saveTimer = setTimeout(saveSettings, 600);
+	saveTimer = setTimeout(() => saveSettings().catch(() => {}), 600);
 }
 
 ["aiBaseUrl", "aiModel", "aiApiVersion", "aiContext", "ignorePatterns"].forEach((id) =>
 	document.getElementById(id).addEventListener("input", autoSave));
-document.getElementById("aiApiKey").addEventListener("change", saveSettings);
-document.getElementById("autoMove").addEventListener("change", saveSettings);
-document.getElementById("threshold").addEventListener("change", saveSettings);
+document.getElementById("aiApiKey").addEventListener("change", () => saveSettings().catch(() => {}));
+document.getElementById("aiDeployment").addEventListener("change", () => saveSettings().catch(() => {}));
+document.getElementById("autoMove").addEventListener("change", () => saveSettings().catch(() => {}));
+document.getElementById("threshold").addEventListener("change", () => saveSettings().catch(() => {}));
 
 // ---- Scan ----
 document.getElementById("scanBtn").addEventListener("click", async () => {
@@ -708,6 +801,9 @@ document.getElementById("logClear").addEventListener("click", () => {
 setInterval(() => { if (document.getElementById("logs").classList.contains("active")) loadLogs(); }, 3000);
 
 async function refreshAll() {
+	// The deployment labels are built in JavaScript, so a language switch has to
+	// rebuild them from the last discovery instead of leaving them translated.
+	if (foundryEnabled && foundryStatus) renderDeployments(foundryStatus);
 	await loadLibraries();
 	await loadItems();
 }

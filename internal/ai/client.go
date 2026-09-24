@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // Config configures the chat client.
@@ -30,6 +32,14 @@ type Config struct {
 	// APIVersion, when set, switches the client into Azure mode and is sent as
 	// the api-version query parameter (e.g. 2024-06-01).
 	APIVersion string
+	// Authorize, when set, signs the request instead of an API key. It is
+	// supplied by the Foundry identity client, which only signs a request whose
+	// target it verified during discovery.
+	Authorize func(*http.Request) error
+	// Reasoning marks a model that only accepts its default sampling
+	// parameters, so no temperature is sent and the retry round trip that
+	// discovers this at runtime is avoided.
+	Reasoning bool
 	// Logger, when set, receives an INFO summary of every call and the full
 	// request/response at DEBUG level (the API key is never logged).
 	Logger *slog.Logger
@@ -44,8 +54,17 @@ type Client struct {
 // New creates a new client.
 func New(cfg Config) *Client {
 	return &Client{
-		cfg:  cfg,
-		http: &http.Client{Timeout: requestTimeout},
+		cfg: cfg,
+		http: &http.Client{
+			Timeout: requestTimeout,
+			// The endpoint is user-configurable and the credential travels in a
+			// request header, which Go would forward to whatever host a
+			// redirect names. Refusing redirects keeps it on the configured
+			// origin.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return errors.New("redirect refused: the credential must not be sent to another host")
+			},
+		},
 	}
 }
 
@@ -53,9 +72,14 @@ func New(cfg Config) *Client {
 // the first token, so the window is generous.
 const requestTimeout = 120 * time.Second
 
-// Configured reports whether the minimum configuration is present.
+// Configured reports whether the minimum configuration is present. A signing
+// hook replaces the API key, because the Foundry identity authenticates with a
+// short-lived token instead.
 func (c *Client) Configured() bool {
-	return c.cfg.BaseURL != "" && c.cfg.APIKey != "" && c.cfg.Model != ""
+	if c.cfg.BaseURL == "" || c.cfg.Model == "" {
+		return false
+	}
+	return c.cfg.APIKey != "" || c.cfg.Authorize != nil
 }
 
 type chatMessage struct {
@@ -99,7 +123,7 @@ func (c *Client) ChatJSON(ctx context.Context, system, user string) (string, err
 		{Role: "user", Content: user},
 	}
 
-	call, err := c.post(ctx, ep, messages, !rejectsTemperature(c.cfg.Model))
+	call, err := c.post(ctx, ep, messages, c.sendsTemperature())
 	if err != nil {
 		return "", err
 	}
@@ -118,7 +142,7 @@ func (c *Client) ChatJSON(ctx context.Context, system, user string) (string, err
 		if c.cfg.Logger != nil {
 			c.cfg.Logger.Error("ai endpoint error", "status", call.status, "url", ep.url, "body", trimmed)
 		}
-		return "", fmt.Errorf("ai endpoint returned %d: %s", call.status, trimmed)
+		return "", fmt.Errorf("ai endpoint returned %d: %s", call.status, sanitize(trimmed))
 	}
 
 	var parsed chatResponse
@@ -188,16 +212,21 @@ func (c *Client) post(ctx context.Context, ep endpoint, messages []chatMessage, 
 			"temperature", withTemperature,
 			"system_prompt", promptOf(messages, "system"), "user_prompt", promptOf(messages, "user"))
 	}
+	return c.do(ctx, ep, payload)
+}
 
+// do performs one authenticated round trip and returns the raw outcome.
+func (c *Client) do(ctx context.Context, ep endpoint, payload []byte) (callResult, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.url, bytes.NewReader(payload))
 	if err != nil {
 		return callResult{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if ep.azureKey {
-		httpReq.Header.Set("api-key", c.cfg.APIKey)
-	} else {
-		httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	if err := c.authorize(httpReq, ep); err != nil {
+		if c.cfg.Logger != nil {
+			c.cfg.Logger.Error("ai authorization failed", "url", ep.url, "err", err)
+		}
+		return callResult{}, fmt.Errorf("ai authorization: %w", err)
 	}
 
 	start := time.Now()
@@ -222,6 +251,96 @@ func (c *Client) post(ctx context.Context, ep endpoint, messages []chatMessage, 
 		c.cfg.Logger.Debug("ai raw response", "status", resp.StatusCode, "duration_ms", duration.Milliseconds(), "body", string(body))
 	}
 	return callResult{status: resp.StatusCode, body: body, duration: duration}, nil
+}
+
+// authorize attaches the credential. A signing hook takes precedence, because
+// a Foundry identity replaces the static key with a short-lived token.
+func (c *Client) authorize(req *http.Request, ep endpoint) error {
+	if c.cfg.Authorize != nil {
+		return c.cfg.Authorize(req)
+	}
+	if ep.azureKey {
+		req.Header.Set("api-key", c.cfg.APIKey)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	}
+	return nil
+}
+
+// Ping verifies that the endpoint is reachable and the credentials are
+// accepted, using the smallest request the chat API allows. It deliberately
+// omits the JSON response format and any token cap, because both are rejected
+// by some deployments and only transport and authentication matter here.
+// Whatever the model answers is discarded; even a refusal proves the endpoint
+// works.
+func (c *Client) Ping(ctx context.Context) error {
+	if !c.Configured() {
+		return fmt.Errorf("ai client not configured")
+	}
+	ep := c.endpoint()
+	reqBody := chatRequest{Messages: []chatMessage{{Role: "user", Content: "ping"}}}
+	if ep.sendModel {
+		reqBody.Model = c.cfg.Model
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+	call, err := c.do(ctx, ep, payload)
+	if err != nil {
+		return err
+	}
+	if call.status < 200 || call.status >= 300 {
+		trimmed := strings.TrimSpace(string(call.body))
+		if c.cfg.Logger != nil {
+			c.cfg.Logger.Error("ai ping failed", "status", call.status, "url", ep.url, "body", trimmed)
+		}
+		return fmt.Errorf("ai endpoint returned %d: %s", call.status, sanitize(trimmed))
+	}
+	var parsed chatResponse
+	if err := json.Unmarshal(call.body, &parsed); err != nil {
+		return fmt.Errorf("decode ai response: %w", err)
+	}
+	if parsed.Error != nil {
+		return fmt.Errorf("ai error: %s", sanitize(parsed.Error.Message))
+	}
+	if c.cfg.Logger != nil {
+		c.cfg.Logger.Info("ai ping",
+			"model", c.cfg.Model, "azure", ep.azureKey, "duration_ms", call.duration.Milliseconds())
+	}
+	return nil
+}
+
+// sendsTemperature reports whether this call may carry an explicit temperature.
+// A deployment known to be a reasoning model skips it without the wasted round
+// trip that discovers the rejection at runtime.
+func (c *Client) sendsTemperature() bool {
+	return !c.cfg.Reasoning && !rejectsTemperature(c.cfg.Model)
+}
+
+// maxErrorChars bounds how much of an upstream error reaches the UI.
+const maxErrorChars = 300
+
+// sanitize bounds and cleans upstream text before it is surfaced. The endpoint
+// is user-configurable, so its response must never push arbitrary control
+// characters or a megabyte of content into an error message.
+func sanitize(s string) string {
+	var b strings.Builder
+	count := 0
+	for _, r := range s {
+		if count == maxErrorChars {
+			b.WriteString("…")
+			break
+		}
+		if r == '\n' || r == '\t' || r == '\r' {
+			r = ' '
+		} else if !unicode.IsPrint(r) {
+			continue
+		}
+		b.WriteRune(r)
+		count++
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // Reasoning models (o-series, GPT-5 and newer) only accept their default

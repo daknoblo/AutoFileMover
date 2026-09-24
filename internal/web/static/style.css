@@ -168,6 +168,14 @@ textarea {
 .stacked-form label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .stacked-form label.checkbox { flex-direction: row; align-items: center; gap: 8px; }
 .stacked-form small { color: var(--muted); }
+.stacked-form > div { display: flex; flex-direction: column; gap: 16px; }
+.stacked-form > div[hidden] { display: none; }
+.form-actions { flex-direction: row !important; align-items: center; flex-wrap: wrap; gap: 12px !important; }
+.form-error { color: var(--red); font-size: 13px; margin: 0; }
+.form-error[hidden] { display: none; }
+.test-result { font-size: 13px; color: var(--muted); }
+.test-result.ok { color: var(--green); }
+.test-result.bad { color: var(--red); }
 
 .list { list-style: none; padding: 0; }
 .list li {

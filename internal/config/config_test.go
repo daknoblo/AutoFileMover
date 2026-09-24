@@ -65,3 +65,42 @@ func TestGetEnvDurationInvalidFallsBack(t *testing.T) {
 		t.Errorf("invalid duration should fall back to default, got %v", got)
 	}
 }
+
+// clearFoundryEnv isolates the test from an ambient Azure configuration.
+func clearFoundryEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"RESOURCE_ID", "TENANT_ID", "CLIENT_ID", "CLIENT_SECRET"} {
+		t.Setenv("AFM_AZURE_"+name, "")
+		t.Setenv("AZURE_"+name, "")
+	}
+}
+
+func TestFoundryIdentityIsOffByDefault(t *testing.T) {
+	clearFoundryEnv(t)
+	if Load().Foundry.Configured() {
+		t.Fatal("Foundry mode must stay off without any Azure variable")
+	}
+}
+
+func TestFoundryIdentityFromEnvironment(t *testing.T) {
+	clearFoundryEnv(t)
+	t.Setenv("AZURE_RESOURCE_ID", "/subscriptions/x")
+	t.Setenv("AZURE_TENANT_ID", "tenant")
+	t.Setenv("AZURE_CLIENT_ID", "client")
+	t.Setenv("AZURE_CLIENT_SECRET", "secret")
+	cfg := Load()
+	if !cfg.Foundry.Configured() || cfg.Foundry.ResourceID != "/subscriptions/x" ||
+		cfg.Foundry.TenantID != "tenant" || cfg.Foundry.ClientID != "client" ||
+		cfg.Foundry.ClientSecret != "secret" {
+		t.Fatalf("identity = %+v", cfg.Foundry)
+	}
+}
+
+func TestProjectPrefixOverridesTheAzureSpelling(t *testing.T) {
+	clearFoundryEnv(t)
+	t.Setenv("AZURE_TENANT_ID", "conventional")
+	t.Setenv("AFM_AZURE_TENANT_ID", "project")
+	if got := Load().Foundry.TenantID; got != "project" {
+		t.Fatalf("TenantID = %q, want the AFM_ prefixed value", got)
+	}
+}

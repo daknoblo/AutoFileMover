@@ -15,6 +15,14 @@ services:
       AFM_SCAN_INTERVAL: "5m"
       AFM_LOG_LEVEL: "info"
       TZ: "Europe/Berlin"
+      # Optional: KI-Endpoint und Deployments aus Azure AI Foundry ermitteln.
+      # Sobald eine dieser Variablen gesetzt ist, entfallen Base-URL, API-Version
+      # und API-Key in der UI; stattdessen wird ein Deployment ausgewählt.
+      # AZURE_RESOURCE_ID: "/subscriptions/<id>/resourceGroups/<group>/providers/Microsoft.CognitiveServices/accounts/<account>"
+      # AZURE_TENANT_ID: "<tenant-uuid>"
+      # AZURE_CLIENT_ID: "<client-uuid>"
+      # Das Clientgeheimnis nur über die Umgebung setzen, z. B. aus einer .env-Datei.
+      # AZURE_CLIENT_SECRET: "${AZURE_CLIENT_SECRET}"
     # Optional passend zum Medienordner setzen, damit verschobene Dateien die
     # erwarteten Besitzer-/Gruppenrechte erhalten.
     # user: "1000:1000"

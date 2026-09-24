@@ -107,18 +107,32 @@
 
 			<h2 data-i18n="ai_title">KI &amp; Verhalten</h2>
 			<form id="settingsForm" class="stacked-form">
-				<label><span data-i18n="ai_base_url">KI Endpoint (Base URL)</span>
-					<input type="text" id="aiBaseUrl" placeholder="https://<resource>.openai.azure.com" />
-				</label>
-				<label><span data-i18n="ai_model">Deployment / Modell</span>
-					<input type="text" id="aiModel" placeholder="gpt-4o-mini" />
-				</label>
-				<label><span data-i18n="ai_api_version">Azure API-Version</span> <small data-i18n="ai_api_version_hint">(nur für .openai.azure.com-Deployments; leer lassen für OpenAI und Foundry-/openai/v1-Endpunkte)</small>
-					<input type="text" id="aiApiVersion" placeholder="2024-06-01" />
-				</label>
-				<label><span data-i18n="ai_api_key">API-Key</span> <small id="keyHint"></small>
-					<input type="password" id="aiApiKey" placeholder="••••••••" autocomplete="off" />
-				</label>
+				<div id="foundryBlock" hidden>
+					<label><span data-i18n="ai_deployment">Foundry-Deployment</span> <small data-i18n="ai_deployment_hint">Aus Azure ermittelt; Zugangsdaten kommen aus den Umgebungsvariablen.</small>
+						<select id="aiDeployment"></select>
+					</label>
+					<p id="foundryMeta" class="hint"></p>
+					<p id="foundryError" class="form-error" hidden></p>
+				</div>
+				<div id="manualBlock">
+					<label><span data-i18n="ai_base_url">KI Endpoint (Base URL)</span>
+						<input type="text" id="aiBaseUrl" placeholder="https://<resource>.openai.azure.com" />
+					</label>
+					<label><span data-i18n="ai_model">Deployment / Modell</span>
+						<input type="text" id="aiModel" placeholder="gpt-4o-mini" />
+					</label>
+					<label><span data-i18n="ai_api_version">Azure API-Version</span> <small data-i18n="ai_api_version_hint">(nur für .openai.azure.com-Deployments; leer lassen für OpenAI und Foundry-/openai/v1-Endpunkte)</small>
+						<input type="text" id="aiApiVersion" placeholder="2024-06-01" />
+					</label>
+					<label><span data-i18n="ai_api_key">API-Key</span> <small id="keyHint"></small>
+						<input type="password" id="aiApiKey" placeholder="••••••••" autocomplete="off" />
+					</label>
+				</div>
+				<div class="form-actions">
+					<button id="testAiBtn" class="btn" type="button" data-i18n="ai_test">Verbindung testen</button>
+					<button id="refreshFoundryBtn" class="btn secondary" type="button" hidden data-i18n="ai_reload_deployments">Deployments neu laden</button>
+					<span id="aiTestResult" class="test-result"></span>
+				</div>
 				<label><span data-i18n="threshold">Schwellwert für automatisches Verschieben:</span> <strong id="thresholdValue">90%</strong>
 					<input type="range" id="threshold" min="0" max="100" step="1" value="90" />
 				</label>

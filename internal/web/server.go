@@ -55,6 +55,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 
+	// AI endpoint: Azure Foundry discovery and a live connection test.
+	mux.HandleFunc("GET /api/foundry", s.handleFoundryStatus)
+	mux.HandleFunc("POST /api/foundry/refresh", s.handleFoundryRefresh)
+	mux.HandleFunc("POST /api/ai/test", s.handleTestAI)
+
 	mux.HandleFunc("GET /api/sources", s.handleListSources)
 	mux.HandleFunc("POST /api/sources", s.handleCreateSource)
 	mux.HandleFunc("DELETE /api/sources/{id}", s.handleDeleteSource)

@@ -91,6 +91,9 @@ func run(addr, root, dbPath string, log *slog.Logger) error {
 		MediaRoot:       root,
 		StabilityWindow: 30 * time.Second,
 		ScanInterval:    5 * time.Minute,
+		// The demo keeps its seeded manual AI settings unless an Azure identity
+		// is supplied, which lets the Foundry settings view be exercised locally.
+		Foundry: config.Load().Foundry,
 	}
 
 	// The log buffer shown in the UI is pre-filled with fixed records and does
