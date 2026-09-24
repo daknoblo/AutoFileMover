@@ -469,6 +469,10 @@ type itemDTO struct {
 }
 
 func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
+	if err := s.refreshSources(r.Context()); err != nil {
+		writeFSErr(w, err)
+		return
+	}
 	status := r.URL.Query().Get("status")
 	items, err := s.store.ListItems(r.Context(), status, 500)
 	if err != nil {
@@ -864,6 +868,10 @@ type queueResponse struct {
 }
 
 func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
+	if err := s.refreshSources(r.Context()); err != nil {
+		writeFSErr(w, err)
+		return
+	}
 	jobs, err := s.store.ListJobs(r.Context(), 200)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

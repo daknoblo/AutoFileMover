@@ -144,6 +144,10 @@ func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
 	}
 	e.beginScan()
 	defer e.finishProgress()
+	if err := e.reconcileSource(ctx, sourcePath); err != nil {
+		e.log.Error("reconcile source", "path", sourcePath, "err", err)
+		return
+	}
 	candidates, err := scanner.ScanSource(sourcePath, sc.settings.IgnorePatterns)
 	if err != nil {
 		e.log.Error("scan source", "path", sourcePath, "err", err)
@@ -163,6 +167,7 @@ func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
 		}
 		if c.SkippedFiles > 0 {
 			e.log.Warn("candidate listing incomplete", "name", c.Name, "skipped", c.SkippedFiles)
+			continue
 		}
 		release, lerr := e.locks.acquire(ctx, c.Path)
 		if lerr != nil {
@@ -177,6 +182,18 @@ func (e *Engine) ProcessSource(ctx context.Context, sourcePath string) {
 }
 
 func (e *Engine) processCandidate(ctx context.Context, sc *scanContext, c scanner.Candidate, sourcePath string) error {
+	// Candidates may have waited behind another item's AI call or a queued move.
+	fresh, err := scanner.Inspect(c.Path)
+	if err != nil {
+		return err
+	}
+	if fresh.SkippedFiles > 0 {
+		return fmt.Errorf("incomplete file listing for %s", c.Path)
+	}
+	if !fresh.IsStable(e.cfg.StabilityWindow) {
+		return nil
+	}
+	c = fresh
 	existing, err := e.store.FindItemBySource(ctx, c.Path)
 	if err != nil {
 		return err
@@ -377,9 +394,17 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 	}
 	defer release()
 
+	c, err := scanner.Inspect(item.SourcePath)
+	if err != nil {
+		return err
+	}
+	if c.SkippedFiles > 0 {
+		return fmt.Errorf("incomplete file listing for %s", item.SourcePath)
+	}
+	item.Files = reconcileFiles(item.Files, c.Files)
 	hasReal := false
 	for _, f := range item.Files {
-		if f.RelPath != "" {
+		if f.RelPath != "" && !f.Done {
 			hasReal = true
 			break
 		}
@@ -403,7 +428,7 @@ func (e *Engine) ReclassifyItem(ctx context.Context, id int64) error {
 	e.updateProgress(0, item.Name)
 
 	sourcePath := filepath.Dir(item.SourcePath)
-	res, err := sc.client.Classify(ctx, e.buildRequest(ctx, sc, item.Name, item.Files, sourcePath))
+	res, err := sc.client.Classify(ctx, e.buildRequest(ctx, sc, item.Name, c.Files, sourcePath))
 	if err != nil {
 		return fmt.Errorf("classify: %w", err)
 	}

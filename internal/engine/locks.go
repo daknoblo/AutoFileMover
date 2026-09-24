@@ -42,16 +42,38 @@ func (l *itemLocks) acquire(ctx context.Context, key string) (func(), error) {
 
 	select {
 	case entry.ch <- struct{}{}:
-		var once sync.Once
-		return func() {
-			once.Do(func() {
-				<-entry.ch
-				l.drop(key, entry)
-			})
-		}, nil
+		return l.release(key, entry), nil
 	case <-ctx.Done():
 		l.drop(key, entry)
 		return nil, ctx.Err()
+	}
+}
+
+// tryAcquire lets read-side reconciliation leave an active operation alone.
+func (l *itemLocks) tryAcquire(key string) (func(), bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	entry, ok := l.m[key]
+	if !ok {
+		entry = &itemLock{ch: make(chan struct{}, 1)}
+		l.m[key] = entry
+	}
+	select {
+	case entry.ch <- struct{}{}:
+		entry.refs++
+		return l.release(key, entry), true
+	default:
+		return nil, false
+	}
+}
+
+func (l *itemLocks) release(key string, entry *itemLock) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			<-entry.ch
+			l.drop(key, entry)
+		})
 	}
 }
 
@@ -68,7 +90,10 @@ func (l *itemLocks) drop(key string, entry *itemLock) {
 // caller never acts on a snapshot that changed while it was waiting.
 func (e *Engine) lockItemByID(ctx context.Context, id int64) (*store.Item, func(), error) {
 	item, err := e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
+	if err != nil {
+		return nil, nil, err
+	}
+	if item == nil {
 		return nil, nil, ErrItemNotFound
 	}
 	release, err := e.locks.acquire(ctx, item.SourcePath)
@@ -76,7 +101,11 @@ func (e *Engine) lockItemByID(ctx context.Context, id int64) (*store.Item, func(
 		return nil, nil, fmt.Errorf("%w: %s", ErrItemBusy, item.Name)
 	}
 	item, err = e.store.GetItem(ctx, id)
-	if err != nil || item == nil {
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
+	if item == nil {
 		release()
 		return nil, nil, ErrItemNotFound
 	}

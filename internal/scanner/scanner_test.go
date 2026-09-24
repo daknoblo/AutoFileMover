@@ -67,6 +67,26 @@ func TestScanSourceEmptyFolderUsesDirMtime(t *testing.T) {
 	}
 }
 
+func TestInspectMissingAndUnreadableDirectories(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Inspect(filepath.Join(root, "gone")); !os.IsNotExist(err) {
+		t.Fatalf("missing directory error = %v", err)
+	}
+	dir := filepath.Join(root, "unreadable")
+	mustMkdir(t, dir)
+	writeFile(t, filepath.Join(dir, "movie.mkv"), "video")
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if _, err := os.ReadDir(dir); err == nil {
+		t.Skip("filesystem permits reading despite removed permissions")
+	}
+	if _, err := Inspect(dir); err == nil {
+		t.Fatal("unreadable directory must not look like an empty candidate")
+	}
+}
+
 func TestMatchesAny(t *testing.T) {
 	if !matchesAny("Movie.sample.mkv", []string{"sample"}) {
 		t.Error("substring match failed")

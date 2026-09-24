@@ -510,8 +510,26 @@ func (s *Store) UpdateItemTarget(ctx context.Context, id int64, libraryID *int64
 
 // DeleteItem removes an item record (does not touch files on disk).
 func (s *Store) DeleteItem(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var running bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM jobs WHERE item_id = ? AND status = ?)`,
+		id, JobRunning).Scan(&running); err != nil {
+		return err
+	}
+	if running {
+		return fmt.Errorf("item has a running job")
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM jobs WHERE item_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 const itemSelect = `SELECT id, source_path, name, detected_type, target_library_id, target_path,

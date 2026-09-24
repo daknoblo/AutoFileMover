@@ -277,6 +277,9 @@ func applyDecisions(files []store.File, decisions []ai.FileDecision, destDir str
 		}
 	}
 	for i := range files {
+		if files[i].Done {
+			continue
+		}
 		// A fresh classification re-evaluates collisions from scratch.
 		files[i].Overwrite = false
 		files[i].OverwritePath = ""

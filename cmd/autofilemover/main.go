@@ -78,7 +78,7 @@ func main() {
 	}()
 
 	// Start the background queue that executes all filesystem work, so no HTTP
-	// request ever waits on the media storage.
+	// action request waits on the media storage.
 	queueDone := make(chan struct{})
 	go func() {
 		defer close(queueDone)

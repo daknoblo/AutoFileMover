@@ -74,13 +74,18 @@ func (s *Store) EnqueueJob(ctx context.Context, itemID int64, kind string, paylo
 	now := time.Now().UTC()
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO jobs(item_id, kind, payload_json, status, attempts, run_after, created_at, updated_at)
-		VALUES(?, ?, ?, ?, 0, ?, ?, ?)`,
-		itemID, kind, string(raw), JobPending, now, now, now)
+		SELECT ?, ?, ?, ?, 0, ?, ?, ? WHERE EXISTS (SELECT 1 FROM items WHERE id = ?)`,
+		itemID, kind, string(raw), JobPending, now, now, now, itemID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return nil, ErrJobExists
 		}
 		return nil, fmt.Errorf("enqueue job: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("enqueue job: %w", err)
+	} else if n == 0 {
+		return nil, fmt.Errorf("enqueue job: item no longer exists")
 	}
 	id, err := res.LastInsertId()
 	if err != nil {

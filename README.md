@@ -74,6 +74,27 @@ A **failed** AI call is **not** retried automatically on the next scan — the
 endpoint is therefore not queried endlessly. A new attempt only happens
 explicitly via "AI match".
 
+### Keeping source listings current
+
+Scans and list refreshes reconcile stored entries with a fresh filesystem read,
+without making extra AI calls or moving files. Missing review/error entries and
+their queued jobs are removed, including when the source folder is completely
+empty. Existing folders get an updated file list: unchanged files keep their
+review decisions, while new or size-changed files require review. Completed
+file actions remain recorded so interrupted transfers can still resume.
+Unclaimed per-file jobs for missing or changed files are discarded. Items
+currently being processed are reconciled on a subsequent refresh.
+
+An unreadable or unavailable source is not treated as empty. Refresh failures
+are shown in the UI and logged; no missing-entry cleanup is performed for that
+source. Reads have a bounded HTTP wait and concurrent polls share one in-flight
+refresh, so a stalled share cannot accumulate refresh tasks.
+
+Completed, rejected and skipped items remain in **History**. **Clear history**
+removes these database records and their jobs after confirmation, but never
+files on disk or items with pending/running jobs. Sources still on disk can be
+detected again after their history record is cleared.
+
 ### Assignment rules
 
 Per library, the **"use a subfolder per title"** checkbox controls how items are

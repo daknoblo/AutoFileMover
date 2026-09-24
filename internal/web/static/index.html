@@ -50,6 +50,7 @@
 	</nav>
 
 	<main>
+		<p id="filesystemError" class="queue-paused" role="alert" hidden></p>
 		<section id="review" class="panel active">
 			<h2 data-i18n="review_title">Zu prüfen</h2>
 			<p class="hint" data-i18n="review_hint">Pro Ordner: jede Datei mit geplanter Aktion (verschieben/löschen) und Wahrscheinlichkeit. Einzeln ausführen oder „Plan ausführen“.</p>
@@ -58,6 +59,7 @@
 
 		<section id="history" class="panel">
 			<h2 data-i18n="tab_history">Verlauf</h2>
+			<button id="clearHistoryBtn" class="btn secondary" type="button" data-i18n="clear_history">Verlauf bereinigen</button>
 			<div id="historyList" class="cards"></div>
 		</section>
 

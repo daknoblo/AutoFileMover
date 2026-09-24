@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/daknoblo/AutoFileMover/internal/config"
 	"github.com/daknoblo/AutoFileMover/internal/engine"
@@ -26,14 +27,16 @@ type Resyncer interface {
 
 // Server is the HTTP server.
 type Server struct {
-	store    *store.Store
-	engine   *engine.Engine
-	queue    *queue.Worker
-	cfg      config.Config
-	log      *slog.Logger
-	resyncer Resyncer
-	logs     *logbuf.Buffer
-	level    *slog.LevelVar
+	store     *store.Store
+	engine    *engine.Engine
+	queue     *queue.Worker
+	cfg       config.Config
+	log       *slog.Logger
+	resyncer  Resyncer
+	logs      *logbuf.Buffer
+	level     *slog.LevelVar
+	refreshMu sync.Mutex
+	refresh   *sourceRefresh
 }
 
 // NewServer creates the HTTP server.
@@ -63,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/libraries/{id}/folders", s.handleLibraryFolders)
 
 	mux.HandleFunc("GET /api/items", s.handleListItems)
+	mux.HandleFunc("DELETE /api/history", s.handleClearHistory)
 	mux.HandleFunc("POST /api/items/{id}/confirm", s.handleConfirmItem)
 	mux.HandleFunc("POST /api/items/{id}/target", s.handleSetItemTarget)
 	mux.HandleFunc("POST /api/items/{id}/file-action", s.handleFileAction)

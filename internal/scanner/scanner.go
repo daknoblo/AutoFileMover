@@ -47,13 +47,22 @@ func ScanSource(sourcePath string, ignore []string) ([]Candidate, error) {
 			continue // skip ignored top-level folders (e.g. _UNPACK)
 		}
 		full := filepath.Join(sourcePath, name)
-		c, err := inspect(full, e.IsDir())
+		c, err := Inspect(full)
 		if err != nil {
-			continue // unreadable entry; skip
+			return nil, err
 		}
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+// Inspect reads one candidate from disk, independently of cached item metadata.
+func Inspect(path string) (Candidate, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return Candidate{}, err
+	}
+	return inspect(path, info.IsDir())
 }
 
 // matchesAny reports whether name matches any ignore pattern. A pattern with
@@ -98,6 +107,9 @@ func inspect(path string, isDir bool) (Candidate, error) {
 	var skipped int
 	err := filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
+			if p == path {
+				return err
+			}
 			// Keep scanning the rest of the folder, but count what was missed so
 			// the caller can report an incomplete listing.
 			skipped++

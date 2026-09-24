@@ -3,8 +3,8 @@
 // history in the database. It backs the afm-demo command, which serves the real
 // web UI so the documentation screenshots always match the shipped product.
 //
-// All titles are fictional and every file is an empty placeholder — the sizes
-// shown in the UI come from the seeded records, not from disk.
+// All titles are fictional. Source placeholders are sparse files whose logical
+// sizes match the seeded records, so live reconciliation preserves the plans.
 package demo
 
 import (
@@ -294,6 +294,16 @@ func seedItems(ctx context.Context, st *store.Store, root string, l libs) error 
 	}
 
 	for i := range items {
+		if !items[i].IsHistory() {
+			for _, f := range items[i].Files {
+				if f.RelPath == "" {
+					continue
+				}
+				if err := os.Truncate(filepath.Join(items[i].SourcePath, f.RelPath), f.Size); err != nil {
+					return fmt.Errorf("size demo placeholder: %w", err)
+				}
+			}
+		}
 		if err := st.UpsertItem(ctx, &items[i]); err != nil {
 			return fmt.Errorf("seed item %q: %w", items[i].Name, err)
 		}

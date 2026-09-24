@@ -56,6 +56,11 @@ async function api(method, path, body) {
 	setConnected(true);
 	if (res.status === 204) return null;
 	const data = await res.json().catch(() => null);
+	if (method === "GET" && (path === "/items" || path === "/queue")) {
+		const warning = document.getElementById("filesystemError");
+		warning.hidden = res.ok;
+		warning.textContent = res.ok ? "" : `${t("refresh_failed")} ${data && data.error ? data.error : "HTTP " + res.status}`;
+	}
 	if (!res.ok) throw new Error(data && data.error ? data.error : "HTTP " + res.status);
 	return data;
 }
@@ -122,6 +127,22 @@ document.getElementById("brandHome").addEventListener("click", () => {
 });
 
 // ---- Items ----
+document.getElementById("clearHistoryBtn").addEventListener("click", async (event) => {
+	if (!confirm(t("clear_history_confirm"))) return;
+	const button = event.currentTarget;
+	button.disabled = true;
+	try {
+		const result = await api("DELETE", "/history");
+		toast(t("history_cleared").replace("{n}", result.removed));
+		await loadItems();
+		await loadQueue();
+	} catch (e) {
+		toast(e.message, true);
+	} finally {
+		button.disabled = false;
+	}
+});
+
 async function loadItems() {
 	const items = await api("GET", "/items");
 	// Keep a stable order in the review queue: sort by source path so editing an

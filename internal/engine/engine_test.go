@@ -26,6 +26,7 @@ func TestApplyDecisions(t *testing.T) {
 		{RelPath: "subdir/Show.S01E01.nfo"}, // matched by base name only
 		{RelPath: "Show.S01E01.sample.mkv"}, // delete
 		{RelPath: "unmatched.txt"},          // no decision -> keep
+		{RelPath: "completed.mkv", Done: true, Action: store.FileActionMove, TargetPath: "/lib/completed.mkv"},
 	}
 	decisions := []ai.FileDecision{
 		{Path: "Show.S01E01.mkv", Action: "move", Confidence: 0.97},
@@ -45,6 +46,9 @@ func TestApplyDecisions(t *testing.T) {
 	}
 	if files[3].Action != store.FileActionKeep {
 		t.Errorf("unmatched file should be keep: %+v", files[3])
+	}
+	if files[4].Action != store.FileActionMove || files[4].TargetPath != "/lib/completed.mkv" {
+		t.Errorf("completed action must remain unchanged: %+v", files[4])
 	}
 }
 
