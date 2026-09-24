@@ -236,6 +236,11 @@ deployments are filtered out. Models that accept no custom temperature, such as
 the GPT-5 and o-series families, are recognised from the deployment metadata, so
 no request is wasted discovering the rejection.
 
+The discovered list is a convenience, not an authority: it is cached for a few
+minutes, so a deployment it does not currently mention is still saved and used,
+and only the endpoint decides whether a call succeeds. A selection that the
+latest discovery no longer lists is marked in the dropdown.
+
 ### Manual mode (typed in)
 
 With none of the Azure identity variables set, the settings page keeps the

@@ -67,3 +67,58 @@ func TestAIClientRequiresASelectedDeployment(t *testing.T) {
 		t.Fatalf("err = %v; want the identity validation error", err)
 	}
 }
+
+func TestFoundryConfigUsesTheSelectionEvenWhenTheCatalogIsStale(t *testing.T) {
+	snapshot := foundry.Snapshot{
+		Endpoint: "https://res.services.ai.azure.com/openai/v1",
+		Deployments: []foundry.Deployment{
+			{Name: "chat", ModelName: "gpt-4o", Reasoning: false},
+			{Name: "reasoner", ModelName: "o3-mini", Reasoning: true},
+		},
+	}
+	cases := []struct {
+		name, selected string
+		wantReasoning  bool
+	}{
+		{"listed non-reasoning deployment", "chat", false},
+		{"listed reasoning deployment", "reasoner", true},
+		{"surrounding whitespace", "  chat  ", false},
+		// A cached listing can be stale or momentarily empty; only Azure can
+		// decide whether the call works, so the selection is still used.
+		{"deployment missing from the catalog", "gpt-6-astra", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := foundryConfig(snapshot, tc.selected)
+			if err != nil {
+				t.Fatalf("foundryConfig: %v", err)
+			}
+			if cfg.Model != strings.TrimSpace(tc.selected) {
+				t.Errorf("model = %q", cfg.Model)
+			}
+			if cfg.BaseURL != snapshot.Endpoint {
+				t.Errorf("base url = %q", cfg.BaseURL)
+			}
+			if cfg.Reasoning != tc.wantReasoning {
+				t.Errorf("reasoning = %v, want %v", cfg.Reasoning, tc.wantReasoning)
+			}
+			if cfg.APIKey != "" || cfg.APIVersion != "" {
+				t.Errorf("foundry mode must not carry a key or api version: %+v", cfg)
+			}
+		})
+	}
+}
+
+func TestFoundryConfigNeedsASelectionAndAnEndpoint(t *testing.T) {
+	withEndpoint := foundry.Snapshot{Endpoint: "https://res.services.ai.azure.com/openai/v1"}
+	if _, err := foundryConfig(withEndpoint, "   "); err == nil ||
+		!strings.Contains(err.Error(), "select") {
+		t.Fatalf("err = %v; want the missing-selection hint", err)
+	}
+	// An empty discovery result leaves no endpoint to talk to, which must be
+	// reported instead of producing a client with an empty base URL.
+	if _, err := foundryConfig(foundry.Snapshot{}, "chat"); err == nil ||
+		!strings.Contains(err.Error(), "endpoint") {
+		t.Fatalf("err = %v; want the missing-endpoint hint", err)
+	}
+}

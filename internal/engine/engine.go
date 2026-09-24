@@ -51,22 +51,46 @@ func (e *Engine) Foundry() *foundry.Provider { return e.foundry }
 // endpoint and the sampling constraints come from the discovered deployment,
 // and a short-lived token replaces the stored API key.
 func (e *Engine) aiConfig(ctx context.Context, settings store.AppSettings) (ai.Config, error) {
-	cfg := ai.Config{Logger: e.log}
 	if !e.foundry.Enabled() {
-		cfg.BaseURL, cfg.APIKey = settings.AIBaseURL, settings.AIAPIKey
-		cfg.Model, cfg.APIVersion = settings.AIModel, settings.AIAPIVersion
-		return cfg, nil
+		return ai.Config{Logger: e.log,
+			BaseURL: settings.AIBaseURL, APIKey: settings.AIAPIKey,
+			Model: settings.AIModel, APIVersion: settings.AIAPIVersion}, nil
 	}
 	snapshot, err := e.foundry.Catalog(ctx, false)
 	if err != nil {
 		return ai.Config{}, err
 	}
-	deployment, ok := snapshot.Find(strings.TrimSpace(settings.AIModel))
-	if !ok {
-		return ai.Config{}, fmt.Errorf("select an available Azure Foundry chat deployment in the settings")
+	cfg, err := foundryConfig(snapshot, settings.AIModel)
+	if err != nil {
+		return ai.Config{}, err
 	}
-	cfg.BaseURL, cfg.Model = snapshot.Endpoint, deployment.Name
-	cfg.Reasoning, cfg.Authorize = deployment.Reasoning, e.foundry.Authorize
+	if _, listed := snapshot.Find(cfg.Model); !listed {
+		e.log.Warn("selected deployment is not in the Azure catalog; using it anyway",
+			"deployment", cfg.Model)
+	}
+	cfg.Logger, cfg.Authorize = e.log, e.foundry.Authorize
+	return cfg, nil
+}
+
+// foundryConfig turns a discovery result and the stored selection into a chat
+// configuration. The catalog is a convenience list, not an authority: a
+// deployment it does not mention is still used, because only Azure can decide
+// whether a call succeeds and a stale listing must never block a valid choice.
+func foundryConfig(snapshot foundry.Snapshot, selected string) (ai.Config, error) {
+	model := strings.TrimSpace(selected)
+	if model == "" {
+		return ai.Config{}, fmt.Errorf("select an Azure Foundry chat deployment in the settings")
+	}
+	if snapshot.Endpoint == "" {
+		return ai.Config{}, fmt.Errorf("the Azure endpoint has not been discovered yet; reload the deployments in the settings")
+	}
+	cfg := ai.Config{BaseURL: snapshot.Endpoint, Model: model}
+	// An unlisted deployment has unknown sampling constraints, so its default
+	// temperature is kept rather than risking a rejected request.
+	cfg.Reasoning = true
+	if deployment, ok := snapshot.Find(model); ok {
+		cfg.Reasoning = deployment.Reasoning
+	}
 	return cfg, nil
 }
 

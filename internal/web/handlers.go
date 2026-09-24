@@ -281,25 +281,23 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// In Foundry mode the model field holds a discovered deployment name, so a
-	// value that Azure does not expose for chat is rejected instead of being
-	// stored and failing silently on the next scan.
-	if model := strings.TrimSpace(dto.AIModel); model != "" && s.engine.Foundry().Enabled() {
-		ctx, cancel := context.WithTimeout(r.Context(), foundryTimeout)
-		defer cancel()
-		snapshot, ferr := s.engine.Foundry().Catalog(ctx, false)
-		if ferr != nil {
-			writeErr(w, http.StatusServiceUnavailable, ferr.Error())
-			return
-		}
-		if _, ok := snapshot.Find(model); !ok {
-			writeErr(w, http.StatusBadRequest, "the selected deployment is not available for chat")
-			return
-		}
+	// A deployment or model name ends up in a request URL or body, so its length
+	// is bounded. In Foundry mode it is an Azure deployment name, which never
+	// carries path or query characters; a manual model name may, because some
+	// OpenAI-compatible proxies use publisher/model identifiers.
+	//
+	// Membership in the discovered catalog is deliberately not required: that
+	// listing is cached and can be stale or momentarily empty, and rejecting the
+	// save would block a selection the user just made from that very list. The
+	// connection test and the next scan report an unusable deployment instead.
+	model := strings.TrimSpace(dto.AIModel)
+	if len(model) > 200 || (s.engine.Foundry().Enabled() && strings.ContainsAny(model, "/\\?#% \t")) {
+		writeErr(w, http.StatusBadRequest, "invalid deployment name")
+		return
 	}
 	err := s.store.SaveAppSettings(r.Context(), store.AppSettings{
 		AIBaseURL:      strings.TrimSpace(dto.AIBaseURL),
-		AIModel:        strings.TrimSpace(dto.AIModel),
+		AIModel:        model,
 		AIAPIVersion:   strings.TrimSpace(dto.AIAPIVersion),
 		AIAPIKey:       dto.AIAPIKey, // empty -> keep existing
 		Threshold:      dto.Threshold,

@@ -41,7 +41,9 @@ dropdown of every chat-capable deployment, with a **Reload deployments** button.
 Embedding, image, audio, batch and responses-only deployments are filtered out,
 and models that accept no custom temperature are recognised from their metadata.
 Requests are signed with a short-lived Entra token, so no endpoint, API version
-or API key is entered.
+or API key is entered. The cached listing never blocks a selection: a deployment
+it does not currently mention is still saved and used, and marked in the
+dropdown.
 
 With none of the Azure variables set, the classic fields apply:
 

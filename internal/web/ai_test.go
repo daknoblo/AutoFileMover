@@ -105,19 +105,53 @@ func TestFoundryStatusReportsDiscoveryFailureInThePayload(t *testing.T) {
 	}
 }
 
-func TestSettingsRejectAnUnavailableDeploymentInFoundryMode(t *testing.T) {
+func TestSettingsStoreTheSelectedDeploymentEvenWhenDiscoveryIsUnavailable(t *testing.T) {
+	// The dropdown is filled from a cached catalog. If saving required that
+	// cache to be reachable and current, a selection the user just made from
+	// that very list could be rejected, which is exactly what must not happen.
 	ts := testFoundryServer(t, foundry.Identity{ResourceID: "nonsense", TenantID: "x",
 		ClientID: "y", ClientSecret: "z"})
-	resp := putJSON(t, ts.URL+"/api/settings", `{"ai_model":"gpt-4o","threshold":0.9}`)
+	resp := putJSON(t, ts.URL+"/api/settings", `{"ai_model":"gpt-6-astra","threshold":0.9}`)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 while discovery is unavailable", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d: %s", resp.StatusCode, body)
 	}
-	// Without a deployment name there is nothing to verify against Azure.
-	empty := putJSON(t, ts.URL+"/api/settings", `{"ai_model":"","threshold":0.9}`)
-	defer empty.Body.Close()
-	if empty.StatusCode != http.StatusOK {
-		t.Fatalf("clearing the deployment failed: %d", empty.StatusCode)
+	var saved struct {
+		AIModel string `json:"ai_model"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.AIModel != "gpt-6-astra" {
+		t.Fatalf("stored deployment = %q", saved.AIModel)
+	}
+}
+
+func TestSettingsRejectAnUnusableDeploymentName(t *testing.T) {
+	ts := testFoundryServer(t, foundry.Identity{ResourceID: "nonsense", TenantID: "x",
+		ClientID: "y", ClientSecret: "z"})
+	for _, model := range []string{"../escape", "name with space", "a?b", strings.Repeat("x", 201)} {
+		body, err := json.Marshal(map[string]any{"ai_model": model, "threshold": 0.9})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp := putJSON(t, ts.URL+"/api/settings", string(body))
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("model %q accepted with status %d", model, resp.StatusCode)
+		}
+	}
+}
+
+func TestSettingsKeepPublisherStyleModelNamesInManualMode(t *testing.T) {
+	// An OpenAI-compatible proxy addresses models as publisher/model, and that
+	// name travels in the request body rather than a URL path.
+	ts, _, _ := testHTTP(t)
+	resp := putJSON(t, ts.URL+"/api/settings", `{"ai_model":"meta-llama/llama-3.3-70b","threshold":0.9}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
 	}
 }
 
