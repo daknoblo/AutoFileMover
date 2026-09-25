@@ -2,6 +2,9 @@
 /autofilemover
 /bin/
 /out/
+# Compiled helper tools; the workflows run them with "go run".
+/tools/site/site
+/tools/screenshots/screenshots
 
 # Local data / SQLite
 data/

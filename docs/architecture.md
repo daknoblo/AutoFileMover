@@ -36,7 +36,35 @@ download → watcher → scanner → engine → ai.Classify
 Each item (a folder or a loose file) carries a list of files; the AI assigns
 each `move`, `delete` or `keep` with a probability. On execution the engine
 moves wanted files, deletes junk and removes the emptied source folder. In the
-review queue every file can be confirmed individually.
+review queue every file can be confirmed individually, and each file shows what
+happens to it: a destination, an explicit *deleted* marker, or a review note.
+
+The byte sizes decide which of several videos is the feature. As a safety net
+the largest video is never deleted automatically: a model that proposes it — for
+example by mixing up the feature and a sample — has that file downgraded to
+manual review, because discarded junk is cheap to redo while a deleted feature
+is not. A video whose own name marks it as a sample or trailer stays deletable,
+and an explicit choice by the user is never overridden.
+
+## Keeping the lists current
+
+A scan reads the filesystem, but records can outlive the files they describe. A
+shared background reconciliation therefore re-reads the configured sources,
+removes items whose source disappeared, refreshes stored file metadata and
+prunes jobs that lost their item. It is triggered by the list endpoints but
+never blocks them: they answer from the database immediately while
+`/api/status` reports whether a refresh is running, when it last succeeded and
+why it failed. Terminal history is kept and can be cleared explicitly.
+
+## AI endpoint
+
+The chat client speaks the OpenAI, Azure OpenAI and Foundry v1 request shapes
+and resolves which one to use from the configured base URL. With an Azure
+identity configured, `internal/foundry` discovers the account's endpoint and its
+chat-capable deployments over ARM and signs each request with a short-lived
+Entra token, so no endpoint or key is entered by hand. Discovery is cached and
+coalesced; a failure never aborts a scan — detection keeps working and the
+candidates go to manual review.
 
 ## Background queue
 

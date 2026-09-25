@@ -39,13 +39,15 @@ endpoint and never watches the filesystem, so the state stays stable.
 `make screenshots` starts that instance inside the pinned Playwright container
 (`tools/screenshots/run.sh`), captures every section listed in
 `tools/screenshots/shots.mjs` and writes `docs/images/*.png` plus the generated
-`docs/demo.md`. Running it in the container keeps fonts, browser build and the
-`/dataroot` paths identical everywhere — screenshots taken on the host would
-differ. The container is pinned to `linux/amd64` to match CI; set
-`AFM_SHOT_PLATFORM=linux/arm64` for a faster native preview run. CI is
-authoritative: it regenerates the screenshots on `main` and commits them if its
-rendering differs by a pixel. Adding a new UI section only means adding one
-entry to `shots.mjs`.
+`docs/demo.md`. The container tag is derived from the `playwright` version in
+`tools/screenshots/package.json`, because the image ships the matching browser
+build — bumping the package alone would otherwise break the capture. Running it
+in the container keeps fonts, browser build and the `/dataroot` paths identical
+everywhere — screenshots taken on the host would differ. The container is pinned
+to `linux/amd64` to match CI; set `AFM_SHOT_PLATFORM=linux/arm64` for a faster
+native preview run. CI is authoritative: it regenerates the screenshots on
+`main` and commits them if its rendering differs by a pixel. Adding a new UI
+section only means adding one entry to `shots.mjs`.
 
 `make site` renders `README.md` and `docs/*.md` into the static site in `site/`
 (`tools/site` is a separate Go module so the service keeps its dependency set).
@@ -58,16 +60,27 @@ requires *Settings → Pages → Source: GitHub Actions* to be enabled once.
 - No built-in authentication. Run on a trusted network or behind a reverse
   proxy / VPN; do not expose it directly to the internet.
 - The API key is stored in the database and only ever reported as "set" — never
-  returned to the UI.
+  returned to the UI. The Azure client secret is read from the environment only
+  and is never persisted.
+- The AI endpoint is user-configurable, so its credential never follows a
+  redirect, and upstream error text is bounded and stripped of control
+  characters before it reaches the UI.
+- Azure discovery only trusts an endpoint, deployment ID and continuation link
+  that belong to the configured account.
 - All UI paths are validated to stay inside `AFM_MEDIA_ROOT`; file actions only
   apply to files already discovered by the scanner.
 - Deletions are permanent. Use what-if mode to preview a plan before applying.
+  The largest video file is never deleted automatically.
 - The container runs as a non-root distroless image with its own healthcheck.
 
 ## Tests
 
 ```bash
-go test ./...
+go test ./...        # unit tests
+go test -race ./...  # the queue and the background refresh are concurrent
 ```
 
-Covers the file mover (move/delete/cleanup) and the AI per-file response parser.
+The suite covers the file mover (move/delete/cleanup), the AI per-file response
+parser and its endpoint resolution, the per-file selection guards, Azure Foundry
+discovery and its endpoint validation, the store's cleanup transactions and the
+REST API including its responsiveness while the filesystem is blocked.

@@ -7,7 +7,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-IMAGE="mcr.microsoft.com/playwright:v1.62.1-noble"
+# The container ships the browser build, which must match the playwright package
+# exactly. Deriving the tag from package.json keeps them in step, so a dependency
+# bump of the package alone can no longer break the capture.
+PLAYWRIGHT_VERSION="$(sed -n 's/.*"playwright"[[:space:]]*:[[:space:]]*"\^\{0,1\}\([0-9][^"]*\)".*/\1/p' \
+	"$ROOT/tools/screenshots/package.json" | head -1)"
+if [ -z "$PLAYWRIGHT_VERSION" ]; then
+	echo "cannot read the playwright version from tools/screenshots/package.json" >&2
+	exit 1
+fi
+IMAGE="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
 # CI renders on linux/amd64; matching it locally keeps the committed PNGs
 # byte-identical (set AFM_SHOT_PLATFORM=linux/arm64 for a faster preview run).
 PLATFORM="${AFM_SHOT_PLATFORM:-linux/amd64}"

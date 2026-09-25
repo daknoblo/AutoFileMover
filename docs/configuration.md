@@ -86,6 +86,25 @@ error is shortened and stripped of control characters before it is displayed.
   source folders (e.g. `_UNPACK`); files inside a folder are always listed so
   the AI can decide.
 
+Every file shows what happens to it: a destination folder, an explicit
+**deleted** marker, or a review note. When several videos are present the byte
+sizes decide which one is the feature; the largest video is never deleted
+automatically, so a mixed-up sample cannot destroy the download.
+
+## Maintenance
+
+Both lists can be cleaned up from their headings, and neither ever touches
+media files:
+
+- **Clear history** removes completed, rejected and skipped entries together
+  with their finished jobs. Sources still on disk reappear on the next scan.
+- **Clean up queue** removes completed, failed and orphaned jobs. Valid pending
+  jobs and all running jobs are kept, and a fresh source check is requested.
+
+Stale records are also reconciled automatically: entries whose source folder
+disappeared are removed on the next refresh, which runs in the background
+without blocking the lists.
+
 ## Language
 
 The UI ships English and German; switch in the header. The choice is stored in

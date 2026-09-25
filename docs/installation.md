@@ -38,7 +38,28 @@ services:
 2. **Libraries** — add one target per type, e.g. `Filme` (movie), `Serien`
    (series), `Dokus` (documentary). For series, the show sub-folders must
    already exist; files are sorted into the matching one.
-3. **Settings** — configure the AI endpoint, threshold and ignore patterns.
+3. **Settings** — configure the AI endpoint, threshold and ignore patterns. With
+   an Azure AI Foundry identity in the environment the endpoint and the
+   selectable deployments are discovered automatically; see
+   [Configuration](configuration.md). A **Test connection** button verifies the
+   stored configuration against the live endpoint.
+
+## Image tags & verification
+
+| Tag              | Contents                          |
+| ---------------- | --------------------------------- |
+| `stable`, `latest` | Newest release from `main`      |
+| `1.3`, `1.3.0`   | Pinned release versions           |
+| `dev`            | Newest build from `develop`       |
+
+Images are built for `linux/amd64` and `linux/arm64`, published with an SBOM and
+provenance and signed keyless with cosign:
+
+```bash
+cosign verify ghcr.io/daknoblo/autofilemover:stable \
+  --certificate-identity-regexp '^https://github.com/daknoblo/AutoFileMover/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 ## Build locally
 
