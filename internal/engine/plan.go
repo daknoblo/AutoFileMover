@@ -299,6 +299,53 @@ func applyDecisions(files []store.File, decisions []ai.FileDecision, destDir str
 			files[i].TargetPath = filepath.Join(destDir, filepath.Base(files[i].RelPath))
 		}
 	}
+	protectMainVideo(files)
+}
+
+// sampleMarkers name a video that is deliberately not the feature, so deleting
+// it is the expected outcome even when it is the only video present.
+var sampleMarkers = []string{"sample", "trailer", "proof", "teaser"}
+
+// protectMainVideo downgrades a delete of the largest video file to a manual
+// review. Discarding junk is cheap to redo, but deleting the feature itself is
+// irreversible, so a model that mixes up the main file and a sample must not be
+// able to destroy the download. A video whose own name marks it as a sample is
+// left alone, which keeps a sample-only folder cleanable.
+//
+// Only AI decisions pass through here; an explicit per-file choice by the user
+// takes a different path and is never overridden.
+func protectMainVideo(files []store.File) {
+	// Completed files count when looking for the feature: once it has been
+	// moved, a small leftover video is junk and must stay deletable.
+	main := -1
+	for i := range files {
+		if !videoExts[strings.ToLower(filepath.Ext(files[i].RelPath))] {
+			continue
+		}
+		if main == -1 || files[i].Size > files[main].Size {
+			main = i
+		}
+	}
+	if main == -1 || files[main].Done || files[main].Action != store.FileActionDelete {
+		return
+	}
+	if isSampleName(files[main].RelPath) {
+		return
+	}
+	files[main].Action = store.FileActionKeep
+	files[main].TargetPath = ""
+	files[main].Reason = "largest video file; needs review before deletion"
+}
+
+// isSampleName reports whether the file name itself marks the video as a sample.
+func isSampleName(relPath string) bool {
+	name := strings.ToLower(filepath.Base(relPath))
+	for _, marker := range sampleMarkers {
+		if strings.Contains(name, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyAndDetect maps the AI per-file decisions onto the item files and then

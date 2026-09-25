@@ -124,6 +124,19 @@ evaluates **each file individually** and proposes an action with a confidence:
 - `delete` – sample clips, `.nfo`, screenshots, checksums → deleted permanently.
 - `keep` – uncertain → stays for manual review.
 
+Each file shows what happens to it: a destination folder for a move, an explicit
+**deleted** marker for a delete, and a review note otherwise — so a completed
+delete can never be mistaken for a file that was left behind.
+
+When a folder holds **several videos**, the byte sizes decide: the largest one is
+the feature, every clearly smaller video is a sample or extra, regardless of how
+its name looks. As a safety net the largest video is **never deleted
+automatically** — if the model proposes it anyway, that file is downgraded to
+manual review instead, because a wrongly discarded feature cannot be recovered.
+A video whose own name marks it as a sample or trailer stays deletable, so a
+sample-only folder can still be cleaned up. An explicit per-file choice you make
+yourself is never overridden.
+
 The review queue shows the folder with all files, action labels and percentages.
 On a confident auto-move the movie is moved, leftovers are deleted and the empty
 source folder is removed; in what-if mode everything can be controlled per file

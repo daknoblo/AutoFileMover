@@ -234,6 +234,7 @@ textarea {
 	word-break: break-all; padding-left: 2px;
 }
 .frow-target.none { color: var(--yellow); font-family: inherit; }
+.frow-target.deleted { color: var(--red); font-family: inherit; }
 .frow-meta { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
 .fname { color: var(--text); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .fsize { color: var(--muted); font-size: 12px; white-space: nowrap; flex: 0 0 auto; }

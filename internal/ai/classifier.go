@@ -97,9 +97,14 @@ file, with the EXACT same path and an action:
              screenshots/proof images (.jpg/.png), repair/checksum files (.par2/.sfv/.md5)
              and similar metadata.
   "keep"   = ONLY if you genuinely cannot decide; such items go to manual review.
-Prefer "move"/"delete" over "keep" — most files are clearly one or the other. Use the byte
-sizes: a sample is far smaller than the real feature even with the same extension. Each file
+Prefer "move"/"delete" over "keep" — most files are clearly one or the other. Each file
 decision has its own "confidence" (0.0 to 1.0) and a short "reason".
+
+MULTIPLE VIDEO FILES — compare "size_bytes" and never judge by name alone. Exactly ONE
+video is the feature: the LARGEST one, which always gets "move". Every clearly smaller
+video is a sample, trailer or extra and gets "delete", even when its name looks like the
+real release and contains no "sample". A sample is typically a small fraction of the
+feature. Never mark the largest video "delete".
 
 Then classify the item:
 - type: "movie", "series", "documentary", or "unknown".

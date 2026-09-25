@@ -210,13 +210,18 @@ function fileRows(item, interactive) {
 			f.conflict ? el("span", { class: "fbadge conflict", text: t("conflict_badge") }) : null,
 			f.done ? el("span", { class: "fdone", text: t("done") }) : null,
 		]);
-		// When the file will move, show its destination FOLDER under the file name.
+		// Show what happens (or happened) to the file. Without this a completed
+		// delete looks exactly like an untouched file: both only say "done".
 		let targetEl = null;
 		if (action === "move") {
 			const dir = f.target_path ? f.target_path.substring(0, f.target_path.lastIndexOf("/")) : "";
 			targetEl = dir
 				? el("div", { class: "frow-target", text: "→ " + dir })
 				: el("div", { class: "frow-target none", text: t("no_target") });
+		} else if (action === "delete") {
+			targetEl = el("div", { class: "frow-target deleted", text: f.done ? t("was_deleted") : t("will_delete") });
+		} else if (!isEmpty) {
+			targetEl = el("div", { class: "frow-target none", text: t("needs_review") });
 		}
 		// Action toggles coloured by the AI decision: green=move, red=delete,
 		// yellow=review (unsure). Nothing runs here — execution is on "Apply".
